@@ -1,0 +1,28 @@
+{
+  "name": "yt-snip",
+  "version": "0.1.0",
+  "description": "Windows-style snipping tool for YouTube videos — capture a crop of a video over a time range as an Anki-viewable GIF.",
+  "private": true,
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test:unit": "node test/helpers/coverage-gate.js",
+    "test:e2e": "playwright test --project=firefox",
+    "test:ext": "playwright test --project=chromium-ext",
+    "test:smoke": "node test/smoke/smoke.mjs",
+    "test:yt": "node test/yt/live.mjs",
+    "test:fast": "npm run test:unit && npm run test:e2e",
+    "test": "npm run test:unit && npm run test:e2e && npm run test:smoke && npm run test:ext",
+    "test:fixture": "node test/fixtures/synth.mjs",
+    "harness:refresh": "node test/fixtures/record-harness.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "geckodriver": "^5.0.0",
+    "omggif": "^1.0.10",
+    "selenium-webdriver": "^4.27.0"
+  }
+}

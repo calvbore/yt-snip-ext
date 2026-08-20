@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "yt-snip",
+  "version": "0.1.0",
+  "description": "Tier 3 (B3) Chromium test build: same production code, but content scripts also match the localhost harness and the background is a service worker (the Chromium MV3 form).",
+  "permissions": ["downloads", "storage", "offscreen"],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://*.googlevideo.com/*",
+    "http://127.0.0.1:8123/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "http://127.0.0.1:8123/*"
+      ],
+      "js": [
+        "lib/messaging.js",
+        "lib/scheduler.js",
+        "lib/crop.js",
+        "lib/timeline.js",
+        "lib/state.js",
+        "lib/options.js",
+        "lib/storage.js",
+        "lib/filename.js",
+        "lib/saveflow.js",
+        "content/gif-encoder.js",
+        "content/capture.js",
+        "content/fallback-capture.js",
+        "content/yt-snip.js"
+      ],
+      "css": ["content/yt-snip.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": false
+  },
+  "action": {
+    "default_title": "yt-snip settings"
+  }
+}

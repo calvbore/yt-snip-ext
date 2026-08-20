@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "yt-snip",
+  "version": "0.1.0",
+  "description": "Windows-style snipping tool for YouTube videos: drag a crop, scrub start/end points, and save an Anki-viewable animated clip.",
+  "permissions": ["downloads", "storage", "offscreen"],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://*.googlevideo.com/*"
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "yt-snip@localhost"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": [
+        "lib/messaging.js",
+        "lib/scheduler.js",
+        "lib/crop.js",
+        "lib/timeline.js",
+        "lib/state.js",
+        "lib/options.js",
+        "lib/storage.js",
+        "lib/filename.js",
+        "lib/saveflow.js",
+        "content/gif-encoder.js",
+        "content/capture.js",
+        "content/fallback-capture.js",
+        "content/yt-snip.js"
+      ],
+      "css": ["content/yt-snip.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": false
+  },
+  "action": {
+    "default_title": "yt-snip settings"
+  }
+}

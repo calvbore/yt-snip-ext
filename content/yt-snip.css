@@ -1,0 +1,60 @@
+/*
+ * content/yt-snip.css
+ *
+ * Page-context styles for yt-snip.
+ *
+ * Everything inside the shadow DOM is styled by the embedded <style> that
+ * yt-snip.js injects into the shadow root, so this file only covers the two
+ * nodes that live in the page document:
+ *   1. The snip trigger button injected into YouTube's `.ytp-right-controls`.
+ *   2. The shadow host element appended to `#movie_player`.
+ *
+ * YouTube's chrome buttons are 48x48 with a `.ytp-button` base class; the
+ * trigger mirrors that size and sitls in the right controls row.
+ */
+
+#movie_player .yt-snip-trigger {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  opacity: 0.9;
+}
+
+#movie_player .yt-snip-trigger:hover {
+  opacity: 1;
+  outline: none;
+}
+
+#movie_player .yt-snip-trigger:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+#movie_player .yt-snip-trigger svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+/*
+ * The shadow host. It covers the whole player so the snip overlay and the
+ * timeline handle strip can be positioned absolutely with coordinates derived
+ * from getBoundingClientRect(). The host itself never intercepts pointer
+ * events — only the shadow UI children do.
+ */
+#movie_player .yt-snip-host {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2147483647;
+}

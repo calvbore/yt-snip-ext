@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yt-snip settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="wrap">
+    <h1>yt-snip settings</h1>
+
+    <form id="settings">
+      <label class="field">
+        <span class="field-label">Frames per second</span>
+        <input type="number" id="fps" min="1" max="60" step="1" required>
+        <span class="hint">Capture rate of the saved clip (1–60).</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Max dimension (px)</span>
+        <input type="number" id="maxDimension" min="64" max="8000" step="1" required>
+        <span class="hint">Long edge of the output. The short edge scales with the crop so Anki stays happy.</span>
+      </label>
+
+      <label class="field check">
+        <input type="checkbox" id="saveAs">
+        <span class="field-label">Ask where to save each clip</span>
+      </label>
+
+      <div class="actions">
+        <button type="submit" class="primary">Save</button>
+        <span id="status" class="status" aria-live="polite"></span>
+      </div>
+    </form>
+  </main>
+  <script src="../lib/options.js"></script>
+  <script src="../lib/storage.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

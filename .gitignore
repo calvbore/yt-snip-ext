@@ -1,0 +1,17 @@
+# dependencies / tooling
+node_modules/
+
+# test media fixtures (synthesized by test:fixture, gitignored per plan)
+test/.fixtures/
+
+# playback + test artifacts
+test/.playwright/
+test-results/
+playwright-report/
+
+# archived Tier-2 env investigation scripts (kept locally as evidence; see PLAN.md session log)
+test/smoke/debug/
+
+# misc
+*.log
+.DS_Store
