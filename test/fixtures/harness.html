@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fake Video — YouTube (Tier 1 harness)</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #181818; font-family: system-ui, sans-serif; }
+    #movie_player {
+      position: relative;
+      width: 640px;
+      height: 360px;
+      background: #000;
+      overflow: hidden;
+    }
+    .html5-video-container { position: absolute; inset: 0; }
+    video.html5-main-video { width: 100%; height: 100%; display: block; }
+    .ytp-chrome-bottom {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 48px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 0 12px 6px;
+    }
+    .ytp-progress-bar-container { width: 100%; height: 8px; margin-bottom: 2px; }
+    .ytp-progress-bar {
+      width: 100%;
+      height: 4px;
+      background: #909090;
+      cursor: pointer;
+    }
+    .ytp-chrome-controls { display: flex; align-items: center; }
+    .ytp-right-controls { margin-left: auto; display: flex; align-items: center; }
+    .ytp-button { background: none; border: none; cursor: pointer; }
+    .ytp-settings-button, .ytp-size-button {
+      width: 30px; height: 30px; margin: 0 4px;
+      background: #303030; border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <main id="player-shell">
+    <!-- @harness-shell-start -->
+    <!-- recorded 2026-08-18T04:05:01.356Z from https://www.youtube.com/watch?v=aqz-KE-bpKQ -->
+    <div class="html5-video-player ytp-transparent ytp-exp-bottom-control-flexbox ytp-modern-caption ytp-exp-ppp-update ytp-livebadge-color ytp-grid-scrollable ytp-delhi-modern ytp-delhi-modern-icons ytp-delhi-horizontal-volume-controls ytp-delhi-modern-compact-controls ytp-fit-cover-video ytp-fine-scrubbing-exp ytp-cards-teaser-dismissible ytp-hide-info-bar ytp-large-width-mode ytp-disable-bottom-gradient paused-mode unstarted-mode ytp-autonav-endscreen-cancelled-state ytp-branding-shown" id="movie_player" aria-label="YouTube Video Player"><div class="html5-video-container"><video class="video-stream html5-main-video"></video></div><div class="ytp-gradient-top"></div><div class="ytp-chrome-top"></div><button class="ytp-unmute ytp-popup ytp-button ytp-unmute-animated ytp-unmute-shrink"></button><div class="ytp-gated-actions-overlay"></div><div class="ytp-overlay ytp-speedmaster-overlay"></div><div class="ytp-chrome-bottom"><div class="ytp-progress-bar-container"><div class="ytp-heat-map-container"></div><div class="ytp-progress-bar" aria-label="Seek slider" role="slider"><div class="ytp-chapters-container"></div><div class="ytp-timed-markers-container"></div><div class="ytp-clip-start-exclude"></div><div class="ytp-clip-end-exclude"></div><div class="ytp-scrubber-container"></div></div><div class="ytp-fine-scrubbing-container"></div><div class="ytp-bound-time-left"></div><div class="ytp-bound-time-right"></div><div class="ytp-clip-start" title="Watch full video"></div></div><div class="ytp-chrome-controls"><div class="ytp-left-controls"></div><div class="ytp-right-controls"><div class="ytp-right-controls-left"></div><div class="ytp-right-controls-right"></div><button class="ytp-pip-button ytp-button"></button></div></div></div></div>
+    <!-- @harness-shell-end -->
+  </main>
+
+  <p id="result"></p>
+
+  <script>
+    // Pick the media source from ?media= (default: same-origin fixture).
+    // The video is same-origin by default (no taint); the taint test passes
+    // ?media=http://127.0.0.1:8124/test/.fixtures/current/media.webm so a
+    // cross-origin drawImage taints the canvas and forces the fallback path.
+    //
+    // ?play=1 — headless-Chromium fixture mode. Headless Chromium will NOT
+    // present a frame for a *paused* video seek (currentTime never lands), so
+    // the yt-snip capture engine (which pauses before capture) would stall.
+    // Real Chrome presents paused seeks normally; this is purely a headless
+    // quirk. Keeping the video playing makes seeks present frames, so the
+    // Chromium extension e2e (B3) can run the real capture. pause() is
+    // neutralized and playback loops, so the extension's activate-pause is a
+    // no-op and restore behaves as if the user's video was playing.
+    (function () {
+      try {
+        var params = new URLSearchParams(location.search);
+        var src = params.get('media') || '/test/.fixtures/current/media.webm';
+        var v = document.querySelector('video.html5-main-video');
+        if (v) {
+          v.src = src;
+          if (params.get('play') === '1') {
+            v.muted = true;
+            v.loop = true;
+            v.play().catch(function () { /* autoplay policy */ });
+            // Headless Chromium won't present a frame for a *paused* seek
+            // (readyState collapses to metadata and no frame renders). The
+            // extension pauses on activation, so every time the element is
+            // paused we resume it from the page world; the capture engine then
+            // seeks a *playing* video and gets frames. (A direct element-level
+            // `pause` override does not cross into the isolated content-script
+            // world, so this event-driven rescue is required.)
+            v.addEventListener('pause', function () {
+              v.play().catch(function () { /* autoplay policy */ });
+            });
+          }
+        }
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
+
+  <script>
+    // HARNESS WIRING (kept in sync by the Tier 1 script list in the plan).
+    //
+    // Two modes:
+    //   default        — used by Tier 1: installs a fake browser/storage + the
+    //                    real content scripts as page <script>s.
+    //   ?bare=1        — used by Tier 2: NO stub, NO inline content scripts.
+    //                    The real extension (installed via addAddon) provides
+    //                    everything in its isolated content-script world.
+    //
+    // Ordered dynamic insertion keeps script dependency order (lib/ before
+    // content/), matching the manifest js list.
+    (function () {
+      var params = new URLSearchParams(location.search);
+      if (params.get('bare')) return;
+
+      window.__ytSnipMessages = [];
+      window.__ytSnipStorage = {};
+      window.browser = {
+        runtime: {
+          sendMessage(msg, _transfer) {
+            window.__ytSnipMessages.push(msg);
+            if (msg && msg.type === 'yt-snip:save') {
+              // Test seam: a spec may force a save-flow outcome. An Error means
+              // "the background rejected/hard-failed" (messages then refuse to
+              // cross the boundary); any other value is used as the response.
+              if (window.__ytSnipSaveResponse !== undefined) {
+                if (window.__ytSnipSaveResponse instanceof Error) {
+                  return Promise.reject(window.__ytSnipSaveResponse);
+                }
+                return Promise.resolve(window.__ytSnipSaveResponse);
+              }
+              return Promise.resolve({ ok: true, id: 1 });
+            }
+            return Promise.resolve({});
+          },
+        },
+        storage: {
+          local: {
+            get(keys, cb) {
+              const items = window.__ytSnipStorage;
+              if (typeof cb === 'function') { cb(items); return; }
+              return Promise.resolve(items);
+            },
+            set(values, cb) {
+              Object.assign(window.__ytSnipStorage, values || {});
+              if (typeof cb === 'function') cb();
+              return Promise.resolve();
+            },
+          },
+        },
+      };
+
+      // The same scripts the manifest declares, in manifest order.
+      var files = [
+        '/lib/messaging.js', '/lib/scheduler.js', '/lib/crop.js',
+        '/lib/timeline.js', '/lib/state.js', '/lib/options.js',
+        '/lib/storage.js', '/lib/filename.js', '/lib/saveflow.js',
+        '/content/gif-encoder.js', '/content/capture.js',
+        '/content/fallback-capture.js', '/content/yt-snip.js',
+      ];
+      files.forEach(function (src) {
+        var s = document.createElement('script');
+        s.src = src;
+        s.async = false;
+        document.body.appendChild(s);
+      });
+    })();
+  </script>
+</body>
+</html>
