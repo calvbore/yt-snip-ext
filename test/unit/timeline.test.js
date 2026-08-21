@@ -123,3 +123,57 @@ test('timeline: zoom granularity beats full-duration mapping on long videos', ()
   const perPxMain = 3600 / 100;
   assert.ok(perPxZoomed < perPxMain / 100);
 });
+/* ---- clip translate (band-drag relocation) ---- */
+
+test('timeline: translateClip moves a clip rigidly', () => {
+  const c = { start: 10, end: 14, preview: 12 };
+  assert.deepEqual(timeline.translateClip(c, 5, 60), { start: 15, end: 19, preview: 17 });
+  assert.deepEqual(timeline.translateClip(c, -3, 60), { start: 7, end: 11, preview: 9 });
+});
+
+test('timeline: translateClip clamps at both ends of the video', () => {
+  const c = { start: 2, end: 6, preview: 4 };
+  // Dragged past the end: the clip pins to the right wall, span intact.
+  assert.deepEqual(timeline.translateClip(c, 100, 10), { start: 6, end: 10, preview: 8 });
+  // Dragged past the start: pins to zero.
+  assert.deepEqual(timeline.translateClip({ start: 1, end: 3, preview: 2 }, -9, 10),
+    { start: 0, end: 2, preview: 1 });
+});
+
+test('timeline: translateClip keeps preview inside and span invariant', () => {
+  const out = timeline.translateClip({ start: 20, end: 25, preview: 24 }, 30, 50);
+  assert.equal(out.end - out.start, 5);
+  assert.ok(out.preview >= out.start && out.preview <= out.end);
+  // A full-length clip cannot move at all.
+  assert.deepEqual(timeline.translateClip({ start: 0, end: 50, preview: 10 }, 7, 50),
+    { start: 0, end: 50, preview: 10 });
+});
+
+test('timeline: translateClip tolerates degenerate input', () => {
+  assert.deepEqual(timeline.translateClip(null, 5, 60), { start: 5, end: 5, preview: 5 });
+  // Reversed edges are ordered before translating.
+  assert.deepEqual(timeline.translateClip({ start: 6, end: 2, preview: 3 }, 1, 60),
+    { start: 3, end: 7, preview: 4 });
+  assert.deepEqual(timeline.translateClip({ start: 0, end: 1 }, NaN, 60).start, 0);
+});
+
+/* ---- window edge drag (scrubber bracket grips) ---- */
+
+test('timeline: setWindowEdge drags one edge keeping the other anchored', () => {
+  assert.deepEqual(timeline.setWindowEdge(ZW, 'start', 5, 60, 0.5), { start: 5, end: 20 });
+  assert.deepEqual(timeline.setWindowEdge(ZW, 'end', 40, 60, 0.5), { start: 10, end: 40 });
+});
+
+test('timeline: setWindowEdge enforces minSpan and clamps into the video', () => {
+  // Dragging start past (end - minSpan) floors at the minimum span.
+  assert.deepEqual(timeline.setWindowEdge(ZW, 'start', 19.9, 60, 0.5), { start: 19.5, end: 20 });
+  // Dragging start before 0 clamps at 0.
+  assert.deepEqual(timeline.setWindowEdge(ZW, 'start', -3, 60, 0.5), { start: 0, end: 20 });
+  // End beyond duration clamps; end below start+minSpan floors.
+  assert.deepEqual(timeline.setWindowEdge(ZW, 'end', 99, 60, 0.5), { start: 10, end: 60 });
+  assert.deepEqual(timeline.setWindowEdge(ZW, 'end', 10.1, 60, 0.5), { start: 10, end: 10.5 });
+});
+
+test('timeline: setWindowEdge ignores non-finite targets', () => {
+  assert.deepEqual(timeline.setWindowEdge(ZW, 'start', NaN, 60, 0.5), ZW);
+});

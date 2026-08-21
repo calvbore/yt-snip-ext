@@ -110,6 +110,12 @@
       // media element's duration getter before the content scripts load. The
       // underlying fixture stays 5s — zoom/trim specs assert clip math, not
       // playback, so the real media length is irrelevant there.
+      //
+      // M15: currentTime is virtualized along with duration (the browser
+      // would otherwise clamp every seek to the real 5 s seekable range),
+      // so specs can engage/seek anywhere in the fake timeline. Playback
+      // advancement is not simulated past the real media — long-fixture
+      // specs assert clip/window math on paused videos.
       var fakeDuration = parseFloat(params.get('duration'));
       if (fakeDuration > 0) {
         var v = document.querySelector('video.html5-main-video');
@@ -117,6 +123,22 @@
           get: function () { return fakeDuration; },
           configurable: true,
         });
+        var cdesc = null;
+        var proto = Object.getPrototypeOf(v);
+        while (proto && !cdesc) {
+          cdesc = Object.getOwnPropertyDescriptor(proto, 'currentTime');
+          if (!cdesc) proto = Object.getPrototypeOf(proto);
+        }
+        if (cdesc) {
+          var virtT = cdesc.get.call(v) || 0;
+          Object.defineProperty(v, 'currentTime', {
+            get: function () { return virtT; },
+            set: function (x) {
+              virtT = Math.min(fakeDuration, Math.max(0, +x || 0));
+            },
+            configurable: true,
+          });
+        }
       }
 
       window.__ytSnipMessages = [];

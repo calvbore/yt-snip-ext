@@ -37,9 +37,13 @@
   var CLIP_PAD_S = 3; // default clip bounds: this many seconds each side of
                       // the activation timestamp (clamped to the video)
   var ZOOM_STRIP_H = 14; // detail strip height, px
-  var ZOOM_GAP = 10; // gap between the detail strip and the minimap, px
-  var MINIMAP_H = 6; // full-duration minimap height, px
-  var MINIMAP_GAP = 4; // gap between the minimap and the progress bar, px
+  var ZOOM_GAP = 10; // gap between the detail strip and the scrubber, px
+  var SCRUBBER_H = 13; // lower scrubber height, px (overlays the progress bar)
+  // Movement past this many px turns a band press into a band drag; less is
+  // a click (which snaps the view back around the clip).
+  var SCRUBBER_CLICK_SLOP = 3;
+  var EDGE_PAN_PX = 24; // strip-edge margin where drags auto-pan the window
+  var EDGE_PAN_SPAN_PER_S = 1.2; // auto-pan speed in window-spans per second
   var SEEK_MIN_INTERVAL = 120; // ms between staged seeks during handle drags
 
   var crop = g.ytSnipCrop;
@@ -83,9 +87,8 @@
   var overlayEl = null;
   var rectEl = null;
   var hintEl = null;
-  var timelineEl = null;
   var zoomEl = null;
-  var miniEl = null;
+  var miniEl = null; // the lower scrubber (overlays YouTube's progress bar)
   var toolbarEl = null;
   var captureEl = null;
   var loopBtn = null;
@@ -313,31 +316,37 @@
     '  color: #fff; padding: 8px 14px; border-radius: 4px;',
     '  font: 13px/1.4 system-ui, sans-serif; pointer-events: none;',
     '  white-space: nowrap; }',
-    '.snip-timeline { position: absolute; pointer-events: none; }',
-    '.snip-tl-band { position: absolute; height: 100%;',
-    '  background: rgba(15,157,255,0.4); pointer-events: none; }',
     /* Origin tick: where the video was when the tool was activated (the exact
        timestamp any exit restores to). Static, non-interactive, visually
-       distinct from the yellow preview head and blue edge handles. */
+       distinct from the yellow preview head and blue edge handles. Rendered
+       on the detail strip only (M15 removed the main-bar overlay). */
     '.snip-origin { position: absolute; top: 12%; height: 76%; width: 2px;',
     '  background: rgba(255,255,255,0.85); border-radius: 1px;',
     '  transform: translateX(-1px); pointer-events: none; display: none; }',
+    /* Bar variant rides ON the scrubber pill (which overlays the progress
+       bar): unlike the strip's tick it NEVER hides — the activation time
+       stays visible even when the magnified window is elsewhere. */
+    '.snip-scrub-origin { top: 2px; height: 9px; z-index: 3; }',
     '.snip-tl-handle { position: absolute; top: 50%; transform: translate(-50%, -50%);',
-    '  width: ' + HANDLE_W + 'px; height: 26px; background: #ffd400;',
+    '  width: ' + HANDLE_W + 'px; height: ' + ZOOM_STRIP_H + 'px; background: #ffd400;',
     '  border: 1px solid #111; border-radius: 3px; pointer-events: auto;',
     '  cursor: ew-resize; }',
     '.snip-zoom { position: absolute; pointer-events: none; }',
     '.snip-zl-body { position: absolute; left: 0; top: 0; width: 100%; height: 100%;',
     '  background: rgba(0,0,0,0.45); border-radius: 3px; cursor: grab;',
     '  pointer-events: auto; }',
-    '.snip-zoom.panning .snip-zl-body { cursor: grabbing; }',
-    '.snip-zl-band { position: absolute; height: 100%;',
-    '  background: rgba(15,157,255,0.25); pointer-events: none; }',
+    '.snip-zoom.panning .snip-zl-body, .snip-zoom.moving .snip-zl-band { cursor: grabbing; }',
+    '.snip-zl-band { position: absolute; height: 100%; min-width: 5px;',
+    '  background: rgba(15,157,255,0.25); border-radius: 2px;',
+    '  pointer-events: auto; cursor: grab; }',
     /* Strip handles stay inside the strip so their hitboxes never overlap
-       the main bar's own handles (a taller handle would steal its drags). */
+       the scrubber's grips below (a taller handle would steal its drags). */
     '.snip-zl-handle.snip-tl-handle { height: ' + ZOOM_STRIP_H + 'px; }',
-    '.snip-zl-ctl { position: absolute; right: 4px; top: 50%;',
-    '  transform: translateY(-50%); display: flex; gap: 3px; pointer-events: auto; }',
+    /* Controls float ABOVE the strip's top-right corner: inside the row they
+       would cover the timeline's right-edge clamp zone, making an end handle
+       parked near the duration ungrabbable (M15 regression probe). */
+    '.snip-zl-ctl { position: absolute; right: 0; top: -19px;',
+    '  display: flex; gap: 3px; pointer-events: auto; }',
     '.snip-zl-ctl button { padding: 2px 6px; font: bold 11px/1.2 system-ui, sans-serif;',
     '  border: 0; border-radius: 3px; background: rgba(0,0,0,0.85); color: #fff;',
     '  cursor: pointer; }',
@@ -348,17 +357,28 @@
     '  font-variant-numeric: tabular-nums; }',
     '.snip-zl-label.left { left: 4px; }',
     '.snip-zl-label.right { right: 84px; }', // clear of the ＋/－/Fit cluster
-    /* Full-duration minimap between the detail strip and the progress bar:
-       shows where the zoom window (bracket) and clip (band) sit overall. */
-    '.snip-mini { position: absolute; pointer-events: none; }',
-    '.snip-mini-body { position: absolute; left: 0; top: 0; width: 100%; height: 100%;',
-    '  background: rgba(0,0,0,0.45); border-radius: 2px; cursor: pointer;',
-    '  pointer-events: auto; }',
-    '.snip-mini-band { position: absolute; left: 0; top: 0; height: 100%;',
-    '  background: rgba(15,157,255,0.35); pointer-events: none; }',
-    '.snip-mini-win { position: absolute; top: 0; height: 100%;',
-    '  border: 1px solid #ffd400; background: rgba(255,212,0,0.15);',
-    '  pointer-events: none; }',
+    /* Lower scrubber (M15): overlays YouTube's progress bar — snip mode owns
+       that strip. Navigation only: track drag pans the detail window, the
+       bracket's yellow grips resize the zoom, the blue band is the clip.
+       Band click snaps the view back around the clip; band drag relocates
+       the whole clip rigidly (seek-on-release). */
+    '.snip-scrub { position: absolute; pointer-events: none; }',
+    '.snip-scrub-body { position: absolute; left: 0; top: 0; width: 100%; height: 100%;',
+    '  background: rgba(0,0,0,0.55); border-radius: 4px; cursor: pointer;',
+    '  pointer-events: auto;',
+    '  box-shadow: inset 0 1px 0 rgba(255,255,255,0.12); }',
+    '.snip-scrub-band { position: absolute; left: 0; top: 0; height: 100%; min-width: 6px;',
+    '  background: rgba(15,157,255,0.45); border-radius: 2px;',
+    '  pointer-events: auto; cursor: grab; }',
+    '.snip-scrub.moving .snip-scrub-band { cursor: grabbing; }',
+    '.snip-scrub-win { position: absolute; top: -1px; bottom: -1px; box-sizing: border-box;',
+    '  border: 1px solid #ffd400; background: rgba(255,212,0,0.10);',
+    '  border-radius: 3px; pointer-events: none; }',
+    '.snip-scrub-grip { position: absolute; top: -2px; bottom: -2px; width: 7px;',
+    '  background: #ffd400; border: 1px solid #7a6400; border-radius: 3px;',
+    '  cursor: ew-resize; pointer-events: auto; }',
+    '.snip-scrub-grip.left { left: -4px; }',
+    '.snip-scrub-grip.right { right: -4px; }',
     '.snip-toolbar { position: absolute; top: 8px; right: 8px; display: flex;',
     '  gap: 6px; align-items: center; background: rgba(0,0,0,0.85);',
     '  padding: 6px 8px; border-radius: 6px; font: 13px/1 system-ui, sans-serif;',
@@ -452,40 +472,9 @@
 
     shadow.appendChild(overlayEl);
 
-    timelineEl = document.createElement('div');
-    timelineEl.className = 'snip-timeline';
-    timelineEl.style.display = 'none';
-
-    var band = document.createElement('div');
-    band.className = 'snip-tl-band';
-    timelineEl.appendChild(band);
-
-    var otick = document.createElement('div');
-    otick.className = 'snip-origin';
-    timelineEl._origin = otick;
-    timelineEl.appendChild(otick);
-
-    timelineEl._band = band;
-    timelineEl._handles = {};
-    // Preview first so the start/end edges paint above it where they
-    // coincide (e.g. both at t=0 right after engaging).
-    ['preview', 'start', 'end'].forEach(function (role) {
-      var th = document.createElement('div');
-      th.className = 'snip-tl-handle';
-      th.dataset.role = role;
-      (function (role, el) {
-        el.addEventListener('pointerdown', onTlDown);
-        el.addEventListener('pointermove', onTlMove);
-        el.addEventListener('pointerup', onTlUp);
-        el.addEventListener('pointercancel', onTlUp);
-      })(role, th);
-      timelineEl._handles[role] = th;
-      timelineEl.appendChild(th);
-    });
-    shadow.appendChild(timelineEl);
-
     // Detail strip: the zoom window magnified across its full width, with
-    // its own start/preview/end handles editing the same clip.
+    // start/preview/end handles editing the clip (the only editing surface
+    // since M15) plus a grabbable band that relocates the whole clip.
     zoomEl = document.createElement('div');
     zoomEl.className = 'snip-zoom';
     zoomEl.style.display = 'none';
@@ -503,6 +492,11 @@
 
     var zband = document.createElement('div');
     zband.className = 'snip-zl-band';
+    // The band is grabbable (M15): dragging it relocates the whole clip.
+    zband.addEventListener('pointerdown', onZoomDown);
+    zband.addEventListener('pointermove', onZoomMove);
+    zband.addEventListener('pointerup', onZoomUp);
+    zband.addEventListener('pointercancel', onZoomUp);
     zoomEl._band = zband;
     zoomEl.appendChild(zband);
 
@@ -559,27 +553,38 @@
     zoomEl.addEventListener('wheel', onZoomWheel, { passive: false });
     shadow.appendChild(zoomEl);
 
-    // Minimap: full-duration track under the detail strip. Click/drag jumps
-    // the zoom window; the bracket always answers "where am I?".
+    // Lower scrubber: full-duration navigator overlaid on YouTube's progress
+    // bar. One delegated handler set on the root covers track (pan), band
+    // (click = refit, drag = relocate clip), and bracket grips (edge zoom).
     miniEl = document.createElement('div');
-    miniEl.className = 'snip-mini';
+    miniEl.className = 'snip-scrub';
     miniEl.style.display = 'none';
     var mbody = document.createElement('div');
-    mbody.className = 'snip-mini-body';
-    mbody.addEventListener('pointerdown', onMiniDown);
-    mbody.addEventListener('pointermove', onMiniMove);
-    mbody.addEventListener('pointerup', onMiniUp);
-    mbody.addEventListener('pointercancel', onMiniUp);
+    mbody.className = 'snip-scrub-body';
     miniEl._body = mbody;
     miniEl.appendChild(mbody);
     var mband = document.createElement('div');
-    mband.className = 'snip-mini-band';
+    mband.className = 'snip-scrub-band';
     miniEl._band = mband;
     miniEl.appendChild(mband);
     var mwin = document.createElement('div');
-    mwin.className = 'snip-mini-win';
+    mwin.className = 'snip-scrub-win';
+    ['left', 'right'].forEach(function (side) {
+      var grip = document.createElement('div');
+      grip.className = 'snip-scrub-grip ' + side;
+      grip.dataset.edge = side === 'left' ? 'start' : 'end';
+      mwin.appendChild(grip);
+    });
     miniEl._win = mwin;
     miniEl.appendChild(mwin);
+    var morigin = document.createElement('div');
+    morigin.className = 'snip-origin snip-scrub-origin';
+    miniEl._barOrigin = morigin;
+    miniEl.appendChild(morigin);
+    miniEl.addEventListener('pointerdown', onScrubDown);
+    miniEl.addEventListener('pointermove', onScrubMove);
+    miniEl.addEventListener('pointerup', onScrubUp);
+    miniEl.addEventListener('pointercancel', onScrubUp);
     shadow.appendChild(miniEl);
 
     toolbarEl = document.createElement('div');
@@ -737,44 +742,6 @@
     }
   }
 
-  function positionTimeline() {
-    if (!hostEl || !timelineEl) return;
-    var bar = getProgressBar();
-    if (!bar || appState !== 'engaged') {
-      timelineEl.style.display = 'none';
-      return;
-    }
-    var br = rectOf(bar);
-    var hr = rectOf(hostEl);
-    timelineEl.style.display = 'block';
-    timelineEl.style.left = br.left - hr.left + 'px';
-    timelineEl.style.top = br.top - hr.top + 'px';
-    timelineEl.style.width = br.width + 'px';
-    timelineEl.style.height = br.height + 'px';
-
-    var duration = (getVideo() && getVideo().duration) || 0;
-    if (!duration || !clip) return;
-    var bar0 = { x: 0, y: 0, w: br.width, h: br.height };
-    var startX = timeline.timeToX(clip.start, duration, bar0, HANDLE_W);
-    var prevX = timeline.timeToX(clip.preview, duration, bar0, HANDLE_W);
-    var endX = timeline.timeToX(clip.end, duration, bar0, HANDLE_W);
-    timelineEl._handles.start.style.left = startX + 'px';
-    timelineEl._handles.preview.style.left = prevX + 'px';
-    timelineEl._handles.end.style.left = endX + 'px';
-    var band = timeline.rangeBand(clip.start, clip.end, duration, bar0);
-    timelineEl._band.style.left = band.x + 'px';
-    timelineEl._band.style.width = band.w + 'px';
-    // Origin tick: the activation timestamp any exit restores to.
-    var act = machine ? machine.getActivation() : null;
-    if (act && timelineEl._origin) {
-      timelineEl._origin.style.display = 'block';
-      timelineEl._origin.style.left =
-        timeline.timeToX(act.currentTime, duration, bar0) + 'px';
-    } else if (timelineEl._origin) {
-      timelineEl._origin.style.display = 'none';
-    }
-  }
-
   function positionZoom() {
     if (!hostEl || !zoomEl) return;
     var bar = getProgressBar();
@@ -788,8 +755,8 @@
     zoomEl.style.display = 'block';
     zoomEl.style.left = br.left - hr.left + 'px';
     zoomEl.style.width = br.width + 'px';
-    // Stack above the bar: [detail strip][gap][minimap][gap][progress bar].
-    zoomEl.style.top = br.top - hr.top - MINIMAP_H - MINIMAP_GAP - ZOOM_GAP - ZOOM_STRIP_H + 'px';
+    // Stack: [detail strip][gap][scrubber overlaying the progress bar].
+    zoomEl.style.top = br.top - hr.top - ZOOM_GAP - ZOOM_STRIP_H + 'px';
     zoomEl.style.height = ZOOM_STRIP_H + 'px';
 
     var duration = (getVideo() && getVideo().duration) || 0;
@@ -811,8 +778,8 @@
     // Edge timestamps answer "where in the video am I?" at a glance.
     zoomEl._labelStart.textContent = formatTime(zoomWindow.start);
     zoomEl._labelEnd.textContent = formatTime(zoomWindow.end);
-    // Origin tick on the strip: hidden while the activation timestamp is
-    // outside the magnified window (the main bar's tick always shows it).
+    // Origin tick on the strip: the activation timestamp any exit restores
+    // to. Hidden while that time is outside the magnified window.
     var zact = machine ? machine.getActivation() : null;
     if (zact && zoomEl._origin &&
         zact.currentTime >= zoomWindow.start && zact.currentTime <= zoomWindow.end) {
@@ -822,14 +789,15 @@
     } else if (zoomEl._origin) {
       zoomEl._origin.style.display = 'none';
     }
-    // The minimap mirrors this window against the full duration; keeping the
-    // redraw in one place means every zoom/pan/refit path stays in sync.
+    // The scrubber mirrors this window against the full duration; keeping
+    // the redraw in one place means every zoom/pan/refit path stays in sync.
     positionMini();
   }
 
   /**
-   * Full-duration minimap under the detail strip: clip band + zoom-window
-   * bracket. Click/drag on it recenters the window ("where am I?" / "go there").
+   * Full-duration scrubber overlaid on YouTube's progress bar: clip band +
+   * zoom-window bracket with edge grips. Navigation only — the strip above
+   * owns all editing.
    */
   function positionMini() {
     if (!hostEl || !miniEl) return;
@@ -843,8 +811,12 @@
     miniEl.style.display = 'block';
     miniEl.style.left = br.left - hr.left + 'px';
     miniEl.style.width = br.width + 'px';
-    miniEl.style.top = br.top - hr.top - MINIMAP_H - MINIMAP_GAP + 'px';
-    miniEl.style.height = MINIMAP_H + 'px';
+    // Sit ON TOP of the progress bar, vertically centered on it (the pill
+    // is taller than the native line and overhangs evenly): snip mode owns
+    // that strip — native hover-scrub is covered until exit.
+    var mtop = br.top - hr.top + (br.height - SCRUBBER_H) / 2;
+    miniEl.style.top = mtop + 'px';
+    miniEl.style.height = SCRUBBER_H + 'px';
 
     var duration = (getVideo() && getVideo().duration) || 0;
     if (!duration) return;
@@ -857,11 +829,27 @@
       miniEl._win.style.left = (zoomWindow.start / duration) * w + 'px';
       miniEl._win.style.width = ((zoomWindow.end - zoomWindow.start) / duration) * w + 'px';
     }
+    // Activation-timestamp tick over the native bar: the exact restore
+    // target, always visible here — the strip's own tick hides when the
+    // magnified window pans away from that time.
+    var oact = machine ? machine.getActivation() : null;
+    if (oact && miniEl._barOrigin) {
+      miniEl._barOrigin.style.display = 'block';
+      miniEl._barOrigin.style.left =
+        timeline.clamp(oact.currentTime / duration, 0, 1) * w + 'px';
+    } else if (miniEl._barOrigin) {
+      miniEl._barOrigin.style.display = 'none';
+    }
   }
 
-  /* --------------------------- minimap interaction ------------------------- */
+  /* --------------------------- scrubber interaction ----------------------- */
 
-  var miniDrag = false;
+  // M15: navigation-only scrubber. One drag state covers every gesture:
+  //   { kind: 'pan' }                          — track drag jumps the window
+  //   { kind: 'zoom', edge, win }              — bracket grip resizes zoom
+  //   { kind: 'maybe-translate', startX, clipStart } — band press (undecided)
+  //   { kind: 'translate', ... }               — band drag relocates the clip
+  var scrubDrag = null;
 
   /** Recenter the zoom window around `clientX`, preserving its span. */
   function jumpWindowTo(clientX) {
@@ -878,25 +866,124 @@
     positionZoom();
   }
 
-  function onMiniDown(e) {
+  /** Client x on the scrubber → full-video time. */
+  function scrubXToTime(clientX) {
+    var mr = rectOf(miniEl);
+    var frac = timeline.clamp((clientX - mr.left) / (mr.width || 1), 0, 1);
+    var video = getVideo();
+    return frac * ((video && video.duration) || 0);
+  }
+
+  /**
+   * Keep the detail window centered on the clip while a translate drag
+   * carries it around the video, preserving the window's span.
+   */
+  function followWindowToClip() {
+    if (!zoomWindow || !clip) return;
+    var video = getVideo();
+    var d = (video && video.duration) || 0;
+    if (!(d > 0)) return;
+    var span = zoomWindow.end - zoomWindow.start;
+    if (!(span > 0) || span >= d) return;
+    var center = (clip.start + clip.end) / 2;
+    var s = timeline.clamp(center - span / 2, 0, d - span);
+    zoomWindow = { start: s, end: s + span };
+  }
+
+  /**
+   * Seek-on-release commit for clip relocation (M15): the whole drag is
+   * seek-free; exactly one seek parks the playhead at the translated clip's
+   * new start. Single flip point if live-preview feedback is ever wanted.
+   */
+  function commitTranslate() {
+    if (!clip) return;
+    clip.preview = clip.start;
+    updateClipLabel();
+    var video = getVideo();
+    if (!video) return;
+    dropStagedSeek(); // an immediate seek must not be overridden by a stale one
+    video.currentTime = clip.start;
+    positionZoom();
+  }
+
+  function onScrubDown(e) {
     if (appState !== 'engaged' || !zoomWindow) return;
     e.preventDefault();
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
-    miniDrag = true;
+    // Band BEFORE grips: when a clip pins to a window edge (outside view)
+    // or the window is microscopically narrow, the band and a grip overlap
+    // — relocation must stay reachable, and the rest of the bracket plus
+    // wheel/buttons still provide zoom.
+    if (e.target === miniEl._band && clip) {
+      scrubDrag = {
+        kind: 'maybe-translate',
+        startX: e.clientX,
+        clipStart: { start: clip.start, end: clip.end, preview: clip.preview },
+      };
+      miniEl.classList.add('moving');
+      return;
+    }
+    var grip = e.target.closest ? e.target.closest('.snip-scrub-grip') : null;
+    if (grip && grip.dataset && grip.dataset.edge) {
+      scrubDrag = {
+        kind: 'zoom',
+        edge: grip.dataset.edge,
+        win: { start: zoomWindow.start, end: zoomWindow.end },
+      };
+      return;
+    }
+    // Track body: jump the window under the cursor ("go there").
+    scrubDrag = { kind: 'pan' };
     jumpWindowTo(e.clientX);
   }
 
-  function onMiniMove(e) {
-    if (!miniDrag) return;
-    jumpWindowTo(e.clientX);
+  function onScrubMove(e) {
+    if (!scrubDrag || appState !== 'engaged') return;
+    if (scrubDrag.kind === 'pan') {
+      jumpWindowTo(e.clientX);
+      return;
+    }
+    if (scrubDrag.kind === 'zoom') {
+      var video = getVideo();
+      var d = (video && video.duration) || 0;
+      if (!d) return;
+      zoomWindow = timeline.setWindowEdge(
+        scrubDrag.win, scrubDrag.edge, scrubXToTime(e.clientX), d,
+        timeline.MIN_WINDOW_SPAN);
+      positionZoom();
+      return;
+    }
+    // Band press → click or translate? Movement decides.
+    if (scrubDrag.kind === 'maybe-translate' &&
+        Math.abs(e.clientX - scrubDrag.startX) > SCRUBBER_CLICK_SLOP) {
+      scrubDrag.kind = 'translate';
+    }
+    if (scrubDrag.kind !== 'translate') return;
+    var v = getVideo();
+    var dur = (v && v.duration) || 0;
+    if (!dur || !clip) return;
+    var mr = rectOf(miniEl);
+    var dt = ((e.clientX - scrubDrag.startX) / (mr.width || 1)) * dur;
+    clip = timeline.translateClip(scrubDrag.clipStart, dt, dur);
+    updateClipLabel();
+    followWindowToClip();
+    positionZoom();
   }
 
-  function onMiniUp() {
-    miniDrag = false;
-  }
-
-  /* ---------------------------------------------------------------- *
+  function onScrubUp() {
+    if (!scrubDrag) return;
+    var kind = scrubDrag.kind;
+    scrubDrag = null;
+    miniEl.classList.remove('moving');
+    if (kind === 'maybe-translate') {
+      // A clean band click: snap the magnified view back around the clip.
+      refitZoomToClip();
+      positionZoom();
+    } else if (kind === 'translate') {
+      commitTranslate();
+    }
+  }  /* ---------------------------------------------------------------- *
    * Selection dragging (pointer handlers over the video overlay)
    * ---------------------------------------------------------------- */
 
@@ -1115,71 +1202,21 @@
    */
   function cancelDrags() {
     dragState = null;
-    tlDrag = null;
-    miniDrag = false;
+    scrubDrag = null;
     dragBox = null;
     if (zoomDrag) {
-      if (zoomEl) zoomEl.classList.remove('panning');
+      if (zoomEl) {
+        zoomEl.classList.remove('panning');
+        zoomEl.classList.remove('moving');
+      }
       zoomDrag = null;
     }
     flushSeek();
   }
 
   /* ---------------------------------------------------------------- *
-   * Timeline handles (start / preview / end)
+   * Clip editing on the detail strip: handles + band translate
    * ---------------------------------------------------------------- */
-
-  var tlDrag = null; // { role, startSel, startX }
-
-  function onTlDown(e) {
-    if (appState !== 'engaged') return;
-    e.preventDefault();
-    e.stopPropagation();
-    var el = e.target.closest('.snip-tl-handle');
-    if (!el || !el.dataset || !el.dataset.role) return;
-    el.setPointerCapture(e.pointerId);
-    tlDrag = { role: el.dataset.role };
-    seekToRole(el.dataset.role);
-  }
-
-  function onTlMove(e) {
-    if (appState !== 'engaged' || !tlDrag) return;
-    var video = getVideo();
-    var duration = (video && video.duration) || 0;
-    var bar = getProgressBar();
-    if (!duration || !bar) return;
-    var br = rectOf(bar);
-    var t = timeline.xToTime(e.clientX, duration, { x: br.left, y: br.top, w: br.width, h: br.height });
-    var ordered = timeline.orderHandles(
-      tlDrag.role === 'start' ? t : clip.start,
-      clip.preview,
-      tlDrag.role === 'end' ? t : clip.end
-    );
-    if (tlDrag.role === 'preview') {
-      ordered.preview = timeline.clamp(t, ordered.start, ordered.end);
-    }
-    if (tlDrag.role === 'end') ordered.end = Math.max(ordered.start, Math.min(t, duration));
-    if (tlDrag.role === 'start') ordered.start = Math.max(0, Math.min(t, ordered.end - MIN_GAP));
-    if (ordered.end - ordered.start < MIN_GAP) {
-      ordered.end = Math.min(duration, ordered.start + MIN_GAP);
-    }
-    // Scrub-under-cursor: an edge drag previews the frame under the dragged
-    // edge (the playhead parks there on release).
-    if (tlDrag.role === 'start') ordered.preview = ordered.start;
-    else if (tlDrag.role === 'end') ordered.preview = ordered.end;
-    clip = ordered;
-    stageSeek(ordered.preview);
-    updateClipLabel();
-    positionTimeline();
-    // Sync rule: a main-bar handle drag refits the detail window around the
-    // new clip so the strip always shows the action (preview drags don't).
-    if (tlDrag.role !== 'preview') refitZoomToClip();
-  }
-
-  function onTlUp(e) {
-    flushSeek();
-    tlDrag = null;
-  }
 
   function seekToRole(role) {
     if (!clip) return;
@@ -1189,14 +1226,16 @@
     var t = role === 'end' ? clip.end : role === 'start' ? clip.start : clip.preview;
     video.currentTime = t;
     updateClipLabel();
-    positionTimeline();
   }
 
   /* ---------------------------------------------------------------- *
    * Detail strip (zoomed window): pan / zoom / window-aware handles
    * ---------------------------------------------------------------- */
 
-  var zoomDrag = null; // { kind: 'handle'|'pan', ... }
+  var zoomDrag = null;
+  // { kind: 'handle'|'pan'|'maybe-translate'|'translate', ... }
+  // 'translate' drags the strip's clip band rigidly (seek-on-release);
+  // handle/translate drags auto-pan the window near the strip edges.
 
   /** Fit the zoom window around the current clip (span padded ~20%/side). */
   function refitZoomToClip() {
@@ -1209,6 +1248,47 @@
     zoomWindow = { start: s, end: s + span };
   }
 
+  /**
+   * Edge auto-pan (M15): while a BAND-TRANSLATE drag holds within
+   * EDGE_PAN_PX of the strip's edge, the window pans in that direction at
+   * up to EDGE_PAN_SPAN_PER_S spans/s so far targets can be reached without
+   * releasing. Driven from the frame loop via zoomDrag.lastClientX.
+   * Deliberately NOT applied to handle drags — a trim must stay put under
+   * the cursor (the strip's granularity guarantee), never slide the view
+   * (and with it the mapped time) out from under an edge being trimmed.
+   * Returns true when a pan step was applied.
+   */
+  function edgeAutoPanFrame() {
+    if (!zoomDrag || zoomDrag.kind !== 'translate') return false;
+    if (zoomDrag.lastClientX == null || !zoomWindow || !zoomEl) return false;
+    var zr = rectOf(zoomEl);
+    if (!zr.width) return false;
+    var x = zoomDrag.lastClientX;
+    var dir = 0;
+    if (x < zr.left + EDGE_PAN_PX) dir = -1;
+    else if (x > zr.right - EDGE_PAN_PX) dir = 1;
+    if (!dir) {
+      zoomDrag.lastPanAt = 0;
+      return false;
+    }
+    var video = getVideo();
+    var d = (video && video.duration) || 0;
+    var span = zoomWindow.end - zoomWindow.start;
+    if (!(d > 0) || !(span > 0) || span >= d) return false;
+    // Proximity deepens the speed: right at the edge pans fastest.
+    var depth = dir < 0
+      ? 1 - (x - zr.left) / EDGE_PAN_PX
+      : 1 - (zr.right - x) / EDGE_PAN_PX;
+    var now = performance.now();
+    var last = zoomDrag.lastPanAt || now;
+    zoomDrag.lastPanAt = now;
+    var dtSec = Math.min(0.25, (now - last) / 1000);
+    zoomWindow = timeline.panWindow(
+      zoomWindow, dir * EDGE_PAN_SPAN_PER_S * depth * dtSec, d);
+    positionZoom();
+    return true;
+  }
+
   function onZoomDown(e) {
     if (appState !== 'engaged') return;
     e.preventDefault();
@@ -1219,6 +1299,17 @@
       zoomDrag = { kind: 'handle', role: el.dataset.role };
       seekToRole(el.dataset.role);
       positionZoom();
+      return;
+    }
+    if (e.target === zoomEl._band && zoomWindow && clip) {
+      // Band press: becomes a translate on movement, or nothing on release.
+      e.currentTarget.setPointerCapture(e.pointerId);
+      zoomDrag = {
+        kind: 'maybe-translate',
+        startX: e.clientX,
+        clipStart: { start: clip.start, end: clip.end, preview: clip.preview },
+      };
+      zoomEl.classList.add('moving');
       return;
     }
     if (e.target === zoomEl._body && zoomWindow) {
@@ -1246,6 +1337,26 @@
       return;
     }
 
+    // Handle and band drags remember the cursor for edge auto-pan (used
+    // by translate drags only — see edgeAutoPanFrame).
+    zoomDrag.lastClientX = e.clientX;
+
+    if (zoomDrag.kind === 'maybe-translate') {
+      if (Math.abs(e.clientX - zoomDrag.startX) <= SCRUBBER_CLICK_SLOP) return;
+      zoomDrag.kind = 'translate';
+    }
+    if (zoomDrag.kind === 'translate') {
+      // Rigid relocation mapped through the magnified window: dx px → dt s.
+      var zrect = rectOf(zoomEl);
+      var span = zoomWindow.end - zoomWindow.start;
+      if (!(span > 0)) return;
+      var dt = ((e.clientX - zoomDrag.startX) / (zrect.width || 1)) * span;
+      clip = timeline.translateClip(zoomDrag.clipStart, dt, duration);
+      updateClipLabel();
+      positionZoom();
+      return;
+    }
+
     var zr = rectOf(zoomEl);
     var t = timeline.xToTimeInWindow(e.clientX, zoomWindow, { x: zr.left, y: zr.top, w: zr.width, h: zr.height });
     var ordered = timeline.orderHandles(
@@ -1261,20 +1372,31 @@
     if (ordered.end - ordered.start < MIN_GAP) {
       ordered.end = Math.min(duration, ordered.start + MIN_GAP);
     }
-    // Same scrub-under-cursor rule as the main bar.
+    // Scrub-under-cursor: an edge drag previews the frame under the dragged
+    // edge (the playhead parks there on release).
     if (zoomDrag.role === 'start') ordered.preview = ordered.start;
     else if (zoomDrag.role === 'end') ordered.preview = ordered.end;
     clip = ordered;
     stageSeek(ordered.preview);
     updateClipLabel();
-    positionTimeline();
     positionZoom();
   }
 
   function onZoomUp() {
-    if (zoomDrag && zoomDrag.kind === 'pan') zoomEl.classList.remove('panning');
-    flushSeek();
+    if (zoomDrag) {
+      if (zoomDrag.kind === 'pan') zoomEl.classList.remove('panning');
+      if (zoomDrag.kind === 'maybe-translate' || zoomDrag.kind === 'translate') {
+        zoomEl.classList.remove('moving');
+      }
+    }
+    var wasTranslate = !!(zoomDrag && zoomDrag.kind === 'translate');
     zoomDrag = null;
+    flushSeek();
+    // The whole band drag was seek-free; one seek parks the playhead at the
+    // relocated clip's new start.
+    if (wasTranslate) commitTranslate();
+    // Note: trims never move the window (M15 decoupling — the strip edits
+    // what it shows; panning/zooming/Fit/band-click own the viewport).
   }
 
   function onZoomWheel(e) {
@@ -1373,9 +1495,9 @@
    */
   function trackPlayhead() {
     if (appState !== 'engaged' || !clip) return;
-    // Any active handle drag owns the playhead (preview drags drive it
-    // directly; W3 edge drags scrub to the dragged edge).
-    if (tlDrag || zoomDrag) return;
+    // Any active drag owns the playhead (preview drags drive it directly;
+    // edge drags scrub to the dragged edge; translates move it as a unit).
+    if (zoomDrag || scrubDrag) return;
     var video = getVideo();
     if (!video) return;
     var t = timeline.clamp(video.currentTime, clip.start, clip.end);
@@ -1612,10 +1734,8 @@
     appState = s;
     if (overlayEl) overlayEl.style.display =
       (s === 'activating' || s === 'selecting' || s === 'engaged') ? 'block' : 'none';
-    if (timelineEl) {
-      timelineEl.style.display = s === 'engaged' ? 'block' : 'none';
-      positionTimeline();
-      positionZoom();
+    if (zoomEl) {
+      positionZoom(); // also drives the scrubber via positionMini
     }
     if (toolbarEl) toolbarEl.style.display = s === 'engaged' ? 'flex' : 'none';
     if (captureEl) captureEl.style.display = s === 'saving' ? 'flex' : 'none';
@@ -1649,10 +1769,9 @@
       setLooping(false);
       updateClipLabel();
       positionRect();
-      // The display block above ran before `clip` existed, so the timeline
-      // and strip handles are still at their unpositioned origin — place
-      // them now (the rAF loop takes over from the next frame).
-      positionTimeline();
+      // The display block above ran before `clip` existed, so strip handles
+      // are still at their unpositioned origin — place them now (the rAF
+      // loop takes over from the next frame).
       positionZoom();
     } else if (s === 'idle') {
       selection = null;
@@ -1661,7 +1780,8 @@
       setLooping(false);
       dropStagedSeek();
       dragBox = null;
-      miniDrag = false;
+      scrubDrag = null;
+      zoomDrag = null;
       hideHint();
       if (rectEl) rectEl.style.display = 'none';
       if (loopBtn) { loopBtn.classList.remove('loop-on'); loopBtn.textContent = 'Loop'; }
@@ -1731,7 +1851,7 @@
     if (selection) positionRect();
     applyPendingSeek();
     trackPlayhead();
-    positionTimeline();
+    edgeAutoPanFrame(); // continuous auto-pan while a strip drag holds an edge
     positionZoom();
     suppressAutohide();
     tickLoop();

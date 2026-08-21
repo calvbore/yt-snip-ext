@@ -37,26 +37,31 @@ Chromium:
 2. Drag a rectangle over the video — that's the crop. Resize handles let you
    fine-tune it once drawn, and dragging the rectangle's body moves the whole
    crop without resizing it.
-3. The timeline under the player shows start/preview/end handles, pre-placed
-   a few seconds around where the video was when you activated the tool. Drag
-   them to narrow or extend the time window; while you drag a start/end
-   handle the video scrubs along with it, and the playhead parks at that edge
+3. The **detail strip** above the player controls is the editing timeline: it
+   shows a magnified zoom window with start/preview/end handles, pre-placed
+   a few seconds around where the video was when you activated the tool.
+   Drag the handles to narrow or extend the time window — while you drag an
+   edge the video scrubs along with it, and the playhead parks at that edge
    on release. The thin **white tick** marks where the video was when you
-   activated the tool — the yellow head shows the live position, the tick
-   never moves, and leaving the tool returns the video to it.
-4. On long videos, use the **detail strip** just above the progress bar: it
-   shows a magnified zoom window with its own start/preview/end handles.
-   `+` / `−` zoom around the center of the view, the mouse wheel zooms at the
-   cursor, dragging the strip's body pans the window, and **Fit** resets it to
-   the whole video. Dragging a handle on the main bar re-fits the window
-   around your selection automatically. The thin **minimap** between the strip
-   and the progress bar always shows where your clip (blue band) and zoom
-   window (yellow bracket) sit in the full video — click or drag it to jump
-   the window anywhere.
+   activated the tool; it never moves, and leaving the tool returns the
+   video to it. Dragging the blue band between the handles moves the whole
+   clip without changing its length (the view follows along; if you push
+   against the strip's edge it auto-pans). `+` / `−` zoom around the center
+   of the view, the mouse wheel zooms at the cursor, dragging empty track
+   pans the window, and **Fit** resets it to the whole video.
+4. The **scrubber pill** sits right on top of YouTube's progress bar while
+   snipping and is navigation only. Click or drag anywhere on it to slide
+   the magnified view to another part of the video; drag its yellow bracket
+   edges to resize the zoom; click the blue clip band to snap the view back
+   around your selection; drag that band to relocate the whole clip to
+   wherever you've browsed (one seek on release parks the playhead at the
+   clip's new start). The white activation tick appears here too, so "where
+   the video was when you started" stays visible even when the magnified
+   view has panned elsewhere.
 5. Pressing **play by any means** (YouTube's button, spacebar, `k`) loops
    playback within your selection so you can preview it (disable via the
    *Loop on play* option; the Loop button is always a manual override). The
-   preview head follows playback on both timelines.
+   preview head follows playback.
 6. Switching windows/tabs never ends a snip session — only Esc, **Exit**,
    saving, or navigating away do.
 7. Click **Save**. The clip is encoded in-page and handed to the extension

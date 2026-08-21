@@ -87,17 +87,29 @@ async function waitForVideo(page, timeoutMs) {
   }, null, { timeout: timeoutMs });
 }
 
-/** Drag a timeline handle (start/end/preview) to `frac` of the real bar. */
+/**
+ * Drag a timeline handle (start/end/preview) so the edited time lands at
+ * `frac` of the full duration. M15: handles live only on the detail strip,
+ * which shows a magnified window — Fit first to make fractions meaningful.
+ */
 async function dragHandle(page, role, frac) {
+  await page.evaluate(() => {
+    const host = document.querySelector('#movie_player .yt-snip-host');
+    if (!host || !host.shadowRoot) return;
+    for (const b of host.shadowRoot.querySelectorAll('.snip-zl-ctl button')) {
+      if (b.textContent.includes('Fit')) { b.click(); break; }
+    }
+  });
+  await page.waitForTimeout(150); // let positionZoom place the fitted handles
   const pos = await page.evaluate((arg) => {
     const host = document.querySelector('#movie_player .yt-snip-host');
     if (!host || !host.shadowRoot) return null;
-    const handle = host.shadowRoot.querySelector('.snip-tl-handle[data-role="' + arg.role + '"]');
+    const strip = host.shadowRoot.querySelector('.snip-zoom');
+    const handle = strip ? strip.querySelector('.snip-tl-handle[data-role="' + arg.role + '"]') : null;
     if (!handle) return null;
     const h = handle.getBoundingClientRect();
-    const bar = document.querySelector('#movie_player .ytp-progress-bar');
-    const b = bar.getBoundingClientRect();
-    return { x1: h.left + h.width / 2, y: h.top + h.height / 2, x2: b.left + b.width * arg.frac };
+    const s = strip.getBoundingClientRect();
+    return { x1: h.left + h.width / 2, y: h.top + h.height / 2, x2: s.left + s.width * arg.frac };
   }, { role, frac });
   if (!pos) throw new Error('timeline handle not found: ' + role);
   await page.mouse.move(pos.x1, pos.y);

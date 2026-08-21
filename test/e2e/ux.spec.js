@@ -6,7 +6,8 @@
  *   - live playhead: the preview head tracks actual playback
  *   - handle drags coalesce into throttled seeks, flushed on release
  *   - transient degenerate videoWidth/videoHeight cannot resize the rect
- *   - minimap: shows the zoom window against the full duration, jumps on click
+ *   - M15 scrubber: overlays the progress bar; track clicks jump the window;
+ *     bracket grips resize zoom; band click refits; band drag relocates
  *   - +/- zoom preserves the window center (no sideways view slides)
  */
 'use strict';
@@ -155,14 +156,16 @@ test.describe('M11 session UX', () => {
     await h.startSnip(page);
     await h.dragSelect(page, { x: 30, y: 30 }, { x: 400, y: 180 });
 
-    // Drag the preview handle across the bar in small delayed steps — the
-    // unthrottled code would write currentTime once per pointermove.
+    // Drag the preview handle across the strip in small delayed steps —
+    // the unthrottled code would write currentTime once per pointermove.
+    // Fit first so 70% of the strip maps to 70% of the duration (M15).
+    await h.clickZoomCtl(page, 'Fit');
     const pos = await page.evaluate(() => {
       const host = document.querySelector('#movie_player .yt-snip-host');
-      const handle = host.shadowRoot.querySelector('.snip-tl-handle[data-role="preview"]');
+      const handle = host.shadowRoot.querySelector('.snip-zoom .snip-tl-handle[data-role="preview"]');
       const r = handle.getBoundingClientRect();
-      const bar = document.querySelector('#movie_player .ytp-progress-bar').getBoundingClientRect();
-      return { x1: r.left + r.width / 2, y: r.top + r.height / 2, x2: bar.left + bar.width * 0.7 };
+      const s = host.shadowRoot.querySelector('.snip-zoom').getBoundingClientRect();
+      return { x1: r.left + r.width / 2, y: r.top + r.height / 2, x2: s.left + s.width * 0.7 };
     });
     const before = await page.evaluate(() => window.__seekCount);
     await page.mouse.move(pos.x1, pos.y);
@@ -209,21 +212,27 @@ test.describe('M11 session UX', () => {
     expect(Math.abs(boxB.height - boxA.height)).toBeLessThan(1.5);
   });
 
-  test('minimap mirrors the window against the full duration and jumps on click', async ({ page }) => {
+  test('the scrubber overlays the progress bar and jumps the window on track clicks', async ({ page }) => {
     await engage(page, { query: { duration: '3600' } });
 
-    const mini = await h.shadowRect(page, '.snip-mini');
+    const scrub = await h.shadowRect(page, '.snip-scrub');
     const strip = await h.shadowRect(page, '.snip-zoom');
-    const barTop = await page.evaluate(() =>
-      document.querySelector('#movie_player .ytp-progress-bar').getBoundingClientRect().top);
-    expect(mini.display).toBe('block');
-    // Stacked between the detail strip and the progress bar.
-    expect(mini.top).toBeGreaterThan(strip.top + strip.height - 1);
-    expect(mini.top + mini.height).toBeLessThanOrEqual(barTop);
+    const bar = await page.evaluate(() => {
+      const b = document.querySelector('#movie_player .ytp-progress-bar')
+        .getBoundingClientRect();
+      return { top: b.top, bottom: b.bottom };
+    });
+    expect(scrub.display).toBe('block');
+    // M15: centered ON the progress bar line (the pill is taller than the
+    // native bar, so it may overhang); the strip stays above the scrubber.
+    const barMid = (bar.top + bar.bottom) / 2;
+    expect(Math.abs(scrub.top + scrub.height / 2 - barMid)).toBeLessThan(2);
+    expect(scrub.top).toBeGreaterThanOrEqual(bar.top - 10);
+    expect(strip.top + strip.height).toBeLessThanOrEqual(scrub.top);
 
     const winBox = () => page.evaluate(() => {
       const host = document.querySelector('#movie_player .yt-snip-host');
-      const w = host.shadowRoot.querySelector('.snip-mini-win');
+      const w = host.shadowRoot.querySelector('.snip-scrub-win');
       return { left: parseFloat(w.style.left), width: parseFloat(w.style.width) };
     });
 
@@ -237,7 +246,7 @@ test.describe('M11 session UX', () => {
     const zwBefore = await h.getZoom(page);
     const spot = await page.evaluate(() => {
       const host = document.querySelector('#movie_player .yt-snip-host');
-      const m = host.shadowRoot.querySelector('.snip-mini-body').getBoundingClientRect();
+      const m = host.shadowRoot.querySelector('.snip-scrub-body').getBoundingClientRect();
       return { x: m.left + m.width * 0.8, y: m.top + m.height / 2 };
     });
     await page.mouse.click(spot.x, spot.y);
@@ -247,6 +256,202 @@ test.describe('M11 session UX', () => {
     }).toBeCloseTo(zwBefore.end - zwBefore.start, 3);
     await expect.poll(async () => (await h.getZoom(page)).start)
       .toBeGreaterThan(zwBefore.start);
+  });
+
+  test('scrubber bracket grips resize the zoom window from their edge', async ({ page }) => {
+    await engage(page, { query: { duration: '3600' } });
+    expect(await h.clickZoomCtl(page, 'Fit')).toBe(true);
+    const zw0 = await h.getZoom(page);
+    expect(zw0.end - zw0.start).toBeCloseTo(3600, 0);
+
+    // Drag the right grip left by ~25% of the scrubber width: the end edge
+    // follows the pointer while the start stays anchored.
+    const grip = await page.evaluate(() => {
+      const host = document.querySelector('#movie_player .yt-snip-host');
+      const g = host.shadowRoot.querySelector('.snip-scrub-grip.right').getBoundingClientRect();
+      const w = host.shadowRoot.querySelector('.snip-scrub-win').getBoundingClientRect();
+      return { x: g.left + g.width / 2, y: g.top + g.height / 2, winLeft: w.left, winW: w.width };
+    });
+    await h.mouseDrag(page, grip.x, grip.y, grip.winLeft + grip.winW * 0.75, grip.y);
+
+    const zw1 = await h.getZoom(page);
+    expect(zw1.end - zw1.start).toBeCloseTo(3600 * 0.75, 0);
+    expect(zw1.start).toBeCloseTo(zw0.start, 0);
+
+    // Left grip back out past the start: clamps at zero, min-span holds.
+    const gripL = await page.evaluate(() => {
+      const host = document.querySelector('#movie_player .yt-snip-host');
+      const g = host.shadowRoot.querySelector('.snip-scrub-grip.left').getBoundingClientRect();
+      return { x: g.left + g.width / 2, y: g.top + g.height / 2 };
+    });
+    await h.mouseDrag(page, gripL.x, gripL.y, gripL.x - 4000, gripL.y);
+    const zw2 = await h.getZoom(page);
+    expect(zw2.start).toBeCloseTo(0, 0);
+    expect(zw2.end).toBeCloseTo(zw1.end, 0);
+  });
+
+  test('clicking the scrubber band snaps the view back around the clip', async ({ page }) => {
+    // Engage mid-video so the clip band sits clear of the bracket grips.
+    await h.openWatch(page, { query: { duration: '3600' } });
+    await page.evaluate(() => {
+      document.querySelector('video.html5-main-video').currentTime = 1800;
+    });
+    await h.startSnip(page);
+    await h.dragSelect(page, { x: 60, y: 40 }, { x: 380, y: 200 });
+
+    // Pan the window far right of the clip first (track click at ~90%).
+    const spot = await page.evaluate(() => {
+      const host = document.querySelector('#movie_player .yt-snip-host');
+      const m = host.shadowRoot.querySelector('.snip-scrub-body').getBoundingClientRect();
+      return { x: m.left + m.width * 0.9, y: m.top + m.height / 2 };
+    });
+    await page.mouse.click(spot.x, spot.y);
+    await expect.poll(async () => {
+      const z = await h.getZoom(page);
+      const c = await h.getClip(page);
+      return z.start > c.end ? 'away' : 'near';
+    }).toBe('away');
+
+    // A clean click on the band refits the window around the clip.
+    const bandSpot = await page.evaluate(() => {
+      const host = document.querySelector('#movie_player .yt-snip-host');
+      const b = host.shadowRoot.querySelector('.snip-scrub-band').getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    });
+    await page.mouse.click(bandSpot.x, bandSpot.y);
+    await expect.poll(async () => {
+      const z = await h.getZoom(page);
+      const c = await h.getClip(page);
+      return z.start <= c.start && z.end >= c.end ? 'around' : 'off';
+    }).toBe('around');
+    // A click must not have edited the clip itself.
+    const c = await h.getClip(page);
+    expect(c.end - c.start).toBeCloseTo(6, 1); // default ±3 s pad
+  });
+
+  test('dragging the scrubber band relocates the clip rigidly and seeks on release', async ({ page }) => {
+    // Engage mid-video so the band is grabbable clear of the grips.
+    await h.openWatch(page, { query: { duration: '3600' } });
+    await page.evaluate(() => {
+      document.querySelector('video.html5-main-video').currentTime = 1000;
+    });
+    await h.startSnip(page);
+    await h.dragSelect(page, { x: 60, y: 40 }, { x: 380, y: 200 });
+    // Fit so the bracket spans the whole track and the ±3 s band (~28%)
+    // sits clear of its grips.
+    expect(await h.clickZoomCtl(page, 'Fit')).toBe(true);
+    const before = await h.getClip(page);
+    expect(before.end - before.start).toBeCloseTo(6, 1); // sanity: mid-clip
+    const span0 = before.end - before.start;
+
+    // Drag the band right by 20% of the scrubber width (= 720 s here).
+    const drag = await page.evaluate(() => {
+      const host = document.querySelector('#movie_player .yt-snip-host');
+      const b = host.shadowRoot.querySelector('.snip-scrub-band').getBoundingClientRect();
+      const s = host.shadowRoot.querySelector('.snip-scrub-body').getBoundingClientRect();
+      return {
+        x1: b.left + b.width / 2, y: b.top + b.height / 2,
+        x2: b.left + b.width / 2 + s.width * 0.2,
+      };
+    });
+    await h.mouseDrag(page, drag.x1, drag.y, drag.x2, drag.y);
+
+    const after = await h.getClip(page);
+    // Rigid move: same span, both edges shifted by the same amount…
+    expect(after.end - after.start).toBeCloseTo(span0, 3);
+    const shift = after.start - before.start;
+    expect(shift).toBeGreaterThan(600); // ≈ 0.2 × 3600 minus clamp slop
+    expect(after.end - before.end).toBeCloseTo(shift, 0);
+    // …with one seek on release parking the playhead at the new start.
+    const t = await page.evaluate(() =>
+      document.querySelector('video.html5-main-video').currentTime);
+    expect(Math.abs(t - after.start)).toBeLessThan(0.05);
+    expect(after.preview).toBeCloseTo(after.start, 3);
+
+    // The detail window followed the relocated clip.
+    const z = await h.getZoom(page);
+    expect(z.start).toBeLessThanOrEqual(after.start);
+    expect(z.end).toBeGreaterThanOrEqual(after.end);
+  });
+
+  test('dragging the strip band translates the clip through the window mapping', async ({ page }) => {
+    // Engage mid-video (virtualized timeline) so the band clears the
+    // handles, then fit so the window mapping is linear across the track.
+    await h.openWatch(page, { query: { duration: '3600' } });
+    await page.evaluate(() => {
+      document.querySelector('video.html5-main-video').currentTime = 1800;
+    });
+    await h.startSnip(page);
+    await h.dragSelect(page, { x: 60, y: 40 }, { x: 380, y: 200 });
+    // Widen the clip (moves the preview handle off the band's center) and
+    // re-fit so the band sits clear of every handle and grip.
+    await h.dragTimelineHandle(page, 'end', 0.75);
+    expect(await h.clickZoomCtl(page, 'Fit')).toBe(true);
+    const before = await h.getClip(page);
+    expect(before.end - before.start).toBeGreaterThan(500); // widened clip
+    const span0 = before.end - before.start;
+
+    const drag = await page.evaluate(() => {
+      const host = document.querySelector('#movie_player .yt-snip-host');
+      const band = host.shadowRoot.querySelector('.snip-zl-band').getBoundingClientRect();
+      return { x1: band.left + band.width / 2, y: band.top + band.height / 2 };
+    });
+    // +100 px on a fitted 3600 s window maps to ≈ +100/width × 3600 s.
+    const width = await page.evaluate(() => {
+      const host = document.querySelector('#movie_player .yt-snip-host');
+      return host.shadowRoot.querySelector('.snip-zoom').getBoundingClientRect().width;
+    });
+    await h.mouseDrag(page, drag.x1, drag.y, drag.x1 + 100, drag.y);
+
+    const after = await h.getClip(page);
+    const expectedDt = (100 / width) * 3600;
+    expect(after.start - before.start).toBeGreaterThan(expectedDt * 0.7);
+    expect(after.start - before.start).toBeLessThan(expectedDt * 1.3);
+    expect(after.end - after.start).toBeCloseTo(span0, 3);
+    // Seek-on-release parks at the translated start.
+    const t = await page.evaluate(() =>
+      document.querySelector('video.html5-main-video').currentTime);
+    expect(Math.abs(t - after.start)).toBeLessThan(0.05);
+  });
+
+  test('holding a strip band drag at the strip edge auto-pans the window', async ({ page }) => {
+    // Engage mid-video, then zoom out twice so the clip band is ~18% of the
+    // strip wide — clear interior between the handles to grab.
+    await h.openWatch(page, { query: { duration: '3600' } });
+    await page.evaluate(() => {
+      document.querySelector('video.html5-main-video').currentTime = 1800;
+    });
+    await h.startSnip(page);
+    await h.dragSelect(page, { x: 60, y: 40 }, { x: 380, y: 200 });
+    expect(await h.clickZoomCtl(page, '\u2212')).toBe(true);
+    expect(await h.clickZoomCtl(page, '\u2212')).toBe(true);
+    const zw0 = await h.getZoom(page);
+
+    // Grab the band's interior (a quarter point in from its start edge,
+    // clear of every handle) and drag it to just inside the LEFT edge,
+    // then hold: translate drags auto-pan the window under the cursor.
+    const grab = await page.evaluate(() => {
+      const host = document.querySelector('#movie_player .yt-snip-host');
+      const strip = host.shadowRoot.querySelector('.snip-zoom');
+      const band = strip.querySelector('.snip-zl-band').getBoundingClientRect();
+      return {
+        x1: band.left + band.width * 0.25, y: band.top + band.height / 2,
+        x2: strip.getBoundingClientRect().left + 8,
+      };
+    });
+    await page.mouse.move(grab.x1, grab.y);
+    await page.mouse.down();
+    await page.mouse.move(grab.x2, grab.y, { steps: 10 });
+    for (let i = 0; i < 22; i++) {
+      await page.mouse.move(grab.x2 + (i % 2), grab.y); // tiny jitters keep moves flowing
+      await page.waitForTimeout(60);
+    }
+    await page.mouse.up();
+
+    const zw1 = await h.getZoom(page);
+    expect(zw1.start).toBeLessThan(zw0.start - 4);
+    // Span preserved by panning.
+    expect(zw1.end - zw1.start).toBeCloseTo(zw0.end - zw0.start, 0);
   });
 
   test('+/- zoom preserves the window center', async ({ page }) => {
@@ -306,53 +511,75 @@ test.describe('M13 exit behavior + origin marker', () => {
     await h.startSnip(page);
     await h.dragSelect(page, { x: 60, y: 40 }, { x: 380, y: 200 });
 
-    const readTick = () => page.evaluate(() => {
+    const readTick = (sel) => page.evaluate((s) => {
       const host = document.querySelector('#movie_player .yt-snip-host');
-      const el = host.shadowRoot.querySelector('.snip-timeline .snip-origin');
+      const el = host.shadowRoot.querySelector(s);
       return { display: el.style.display, left: parseFloat(el.style.left) };
-    });
-    const tick0 = await readTick();
+    }, sel);
+    const STRIP_TICK = '.snip-zoom .snip-origin';
+    const BAR_TICK = '.snip-scrub-origin';
+
+    // The strip carries the tick — and so does the pill riding on
+    // YouTube's progress bar.
+    const tick0 = await readTick(STRIP_TICK);
     expect(tick0.display).toBe('block');
+    const barTick0 = await readTick(BAR_TICK);
+    expect(barTick0.display).toBe('block');
 
-    // The tick sits at activation time (2s of the fixture duration).
-    const geo = await page.evaluate(() => {
+    // The pill's tick sits at activation time as a full-duration fraction.
+    const dur = await page.evaluate(() =>
+      document.querySelector('video.html5-main-video').duration);
+    const scrubW = await page.evaluate(() => {
       const host = document.querySelector('#movie_player .yt-snip-host');
-      const tl = host.shadowRoot.querySelector('.snip-timeline').getBoundingClientRect();
-      const d = document.querySelector('video.html5-main-video').duration;
-      return { w: tl.width, d };
+      return host.shadowRoot.querySelector('.snip-scrub').getBoundingClientRect().width;
     });
-    expect(Math.abs(tick0.left - (2 / geo.d) * geo.w)).toBeLessThan(2);
+    expect(barTick0.left).toBeCloseTo((2 / dur) * scrubW, 0);
 
-    // Edge drag parks the playhead elsewhere; the origin tick does not move.
-    await h.dragTimelineHandle(page, 'end', 0.9);
-    let tick = await readTick();
+    // Edge drag parks the playhead elsewhere; neither tick moves.
+    // (0.75, not nearer the end: a fully-clamped end handle hides beneath
+    // the zoom controls' hover zone at the strip's right edge.)
+    await h.dragTimelineHandle(page, 'end', 0.75);
+    let tick = await readTick(STRIP_TICK);
+    let barTick = await readTick(BAR_TICK);
     expect(Math.abs(tick.left - tick0.left)).toBeLessThan(1);
+    expect(Math.abs(barTick.left - barTick0.left)).toBeLessThan(1);
 
     // Preview drag likewise.
     await h.dragTimelineHandle(page, 'preview', 0.5);
-    tick = await readTick();
+    tick = await readTick(STRIP_TICK);
+    barTick = await readTick(BAR_TICK);
     expect(Math.abs(tick.left - tick0.left)).toBeLessThan(1);
+    expect(Math.abs(barTick.left - barTick0.left)).toBeLessThan(1);
 
-    // Strip tick mirrors the origin while the window contains it…
-    expect(await page.evaluate(() => {
-      const host = document.querySelector('#movie_player .yt-snip-host');
-      return host.shadowRoot.querySelector('.snip-zoom .snip-origin').style.display;
-    })).toBe('block');
-
-    // …and hides once the window is panned away from it (bar tick persists).
+    // Zoom in hard around a spot far from t=2: once the activation time
+    // leaves the magnified window, the strip tick hides…
     await h.clickZoomCtl(page, '+');
     await h.clickZoomCtl(page, '+');
     const mini = await page.evaluate(() => {
       const host = document.querySelector('#movie_player .yt-snip-host');
-      const b = host.shadowRoot.querySelector('.snip-mini').getBoundingClientRect();
+      const b = host.shadowRoot.querySelector('.snip-scrub-body').getBoundingClientRect();
       return { x: b.left + b.width * 0.97, y: b.top + b.height / 2 };
     });
     await page.mouse.click(mini.x, mini.y);
-    expect(await page.evaluate(() => {
+    await expect.poll(() => readTick(STRIP_TICK)).toMatchObject({ display: 'none' });
+
+    // …while the pill's tick persists — that is its whole point…
+    expect((await readTick(BAR_TICK)).display).toBe('block');
+
+    // …and a band click snaps the view back around the clip (t=2 inside),
+    // bringing the strip tick back too.
+    const bandSpot = await page.evaluate(() => {
       const host = document.querySelector('#movie_player .yt-snip-host');
-      return host.shadowRoot.querySelector('.snip-zoom .snip-origin').style.display;
-    })).toBe('none');
-    expect((await readTick()).display).toBe('block');
+      const b = host.shadowRoot.querySelector('.snip-scrub-band').getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    });
+    await page.mouse.click(bandSpot.x, bandSpot.y);
+    await expect.poll(async () => {
+      const z = await page.evaluate(() => window.ytSnip._getZoom());
+      return z.start <= 2 && z.end >= 2;
+    }).toBe(true);
+    await expect.poll(() => readTick(STRIP_TICK)).toMatchObject({ display: 'block' });
+    expect((await readTick(BAR_TICK)).display).toBe('block');
   });
 });
 

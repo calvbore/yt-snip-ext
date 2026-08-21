@@ -136,21 +136,31 @@ async function clickToolbar(page, label) {
 }
 
 /**
- * Drag a timeline handle to `targetFrac` of the progress bar. Uses the real
- * mouse (not synthetic events) so pointer capture set in yt-snip.js works.
+ * Drag a timeline handle so the edited time lands at `targetFrac` of the
+ * full duration. Since M15 the detail strip is the ONLY handle surface and
+ * shows a magnified window, so this fits the window to the whole video
+ * first (making full-duration fractions meaningful) and then targets the
+ * strip. Uses the real mouse so pointer capture works.
  */
 async function dragTimelineHandle(page, role, targetFrac) {
+  await clickZoomCtl(page, 'Fit');
+  await expect.poll(async () => {
+    const z = await getZoom(page);
+    const d = await page.evaluate(() =>
+      document.querySelector('video.html5-main-video').duration);
+    return z ? Math.abs(z.end - z.start - d) : Infinity;
+  }).toBeLessThan(0.01);
   const pos = await page.evaluate((arg) => {
     const host = document.querySelector('#movie_player .yt-snip-host');
-    const handle = host.shadowRoot.querySelector('.snip-tl-handle[data-role="' + arg.role + '"]');
+    const strip = host.shadowRoot.querySelector('.snip-zoom');
+    const handle = strip ? strip.querySelector('.snip-tl-handle[data-role="' + arg.role + '"]') : null;
     if (!handle) return null;
     const h = handle.getBoundingClientRect();
-    const bar = document.querySelector('#movie_player .ytp-progress-bar');
-    const b = bar.getBoundingClientRect();
+    const s = strip.getBoundingClientRect();
     return {
       x1: h.left + h.width / 2,
       y: h.top + h.height / 2,
-      x2: b.left + b.width * arg.frac,
+      x2: s.left + s.width * arg.frac,
     };
   }, { role, frac: targetFrac });
   expect(pos).not.toBeNull();

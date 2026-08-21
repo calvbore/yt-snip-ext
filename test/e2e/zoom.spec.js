@@ -50,33 +50,41 @@ test.describe('zoom detail strip', () => {
     expect(await helpers.getZoom(page)).toBeNull();
   });
 
-  test('long video: + halves the span and handle drags are far finer than the main bar', async ({ page }) => {
+  test('long video: deep zoom makes handle drags far finer than full-duration mapping', async ({ page }) => {
     await engage(page, { query: { duration: '3600' } });
 
     const dur = await page.evaluate(() => document.querySelector('video.html5-main-video').duration);
     expect(dur).toBeCloseTo(3600, 5);
 
-    // Narrow the clip on the main bar first (also refits the window).
+    // Establish a fitted baseline, then build a distinct mid-video clip so
+    // no two handles stack at a clamped edge (M15: trims never move the
+    // window, so this geometry stays put for the whole test). End widens
+    // FIRST — while all handles share the far-left clamp, the end handle
+    // paints topmost and would steal a start-grab.
+    expect(await helpers.clickZoomCtl(page, 'Fit')).toBe(true);
     await helpers.dragTimelineHandle(page, 'end', 0.25);
-    let clip = await helpers.getClip(page);
-    expect(clip.end).toBeLessThan(1800);
+    await helpers.dragTimelineHandle(page, 'start', 0.1);
+    const clip = await helpers.getClip(page);
+    expect(clip.start).toBeGreaterThan(300);
+    expect(clip.end).toBeLessThan(1000);
 
-    // '+' around the preview halves the window span.
-    const zwBefore = await helpers.getZoom(page);
-    expect(await helpers.clickZoomCtl(page, '+')).toBe(true);
-    const zwAfter = await helpers.getZoom(page);
-    const spanBefore = zwBefore.end - zwBefore.start;
-    const spanAfter = zwAfter.end - zwAfter.start;
-    expect(spanAfter).toBeCloseTo(spanBefore / 2, 3);
-
-    // Second '+' → deep enough that drags are an order of magnitude finer
-    // than the full-duration main-bar mapping.
-    await helpers.clickZoomCtl(page, '+');
+    // Zoom in ×16 with the cursor parked ON the start handle: the anchor
+    // stays under the cursor, so the start edge never clamps.
+    const spot = await page.evaluate(() => {
+      const host = document.querySelector('#movie_player .yt-snip-host');
+      const strip = host.shadowRoot.querySelector('.snip-zoom');
+      const h = strip.querySelector('.snip-tl-handle[data-role="start"]').getBoundingClientRect();
+      return { x: h.left + h.width / 2, y: h.top + h.height / 2 };
+    });
+    await page.mouse.move(spot.x, spot.y);
+    for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -120);
+    await page.waitForTimeout(120);
 
     // Drag the zoomed start handle right by ~30px: clip.start must move by
     // roughly Δpx * span/stripWidth — at least 10× finer than one main-bar
     // pixel-equivalent (3600s / stripWidth).
     const zwPreDrag = await helpers.getZoom(page);
+    expect(zwPreDrag.end - zwPreDrag.start).toBeCloseTo(225, 0);
     const handleX = () =>
       page.evaluate(() => {
         const host = document.querySelector('#movie_player .yt-snip-host');
@@ -108,8 +116,7 @@ test.describe('zoom detail strip', () => {
     expect(m.moved).toBeLessThan(expectedPerPx * m.dx * 1.6); // follows the window mapping
     expect(m.moved).toBeLessThan((3600 / m.w) * m.dx / 10); // ≥10× finer than the main bar
 
-    // Pan the body right by ~100px: span preserved, window shifts forward
-    // (the window hugs the left edge here, so right is the free direction).
+    // Pan the body right by ~100px: span preserved, window shifts forward.
     const zwPanBefore = await helpers.getZoom(page);
     const panFrom = await page.evaluate(() => {
       const host = document.querySelector('#movie_player .yt-snip-host');

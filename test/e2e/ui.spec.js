@@ -115,25 +115,42 @@ test.describe('timeline handles and loop', () => {
     await h.dragSelect(page, { x: 30, y: 30 }, { x: 400, y: 180 });
   });
 
-  test('engaged shows the three timeline handles + range band', async ({ page }) => {
-    const tl = await h.shadowRect(page, '.snip-timeline');
-    expect(tl.display).toBe('block');
+  test('engaged shows editing handles on the strip; the main bar stays native', async ({ page }) => {
+    // M15: the detail strip is the only editing surface.
+    const strip = await h.shadowRect(page, '.snip-zoom');
+    expect(strip.display).toBe('block');
     for (const role of ['start', 'preview', 'end']) {
       const handle = await page.evaluate((r) => {
         const host = document.querySelector('#movie_player .yt-snip-host');
-        const el = host.shadowRoot.querySelector('.snip-tl-handle[data-role="' + r + '"]');
+        const stripEl = host.shadowRoot.querySelector('.snip-zoom');
+        const el = stripEl.querySelector('.snip-tl-handle[data-role="' + r + '"]');
         if (!el) return null;
-        const cs = getComputedStyle(el);
-        return { display: cs.display };
+        return { display: getComputedStyle(el).display };
       }, role);
       expect(handle.display).toBe('block');
     }
     const bandVisible = await page.evaluate(() => {
       const host = document.querySelector('#movie_player .yt-snip-host');
-      const band = host.shadowRoot.querySelector('.snip-tl-band');
+      const band = host.shadowRoot.querySelector('.snip-zl-band');
       return getComputedStyle(band).display === 'block' && parseFloat(band.style.width) > 0;
     });
     expect(bandVisible).toBe(true);
+
+    // The old main-bar overlay is gone entirely…
+    const mainBarOverlay = await page.evaluate(() => {
+      const host = document.querySelector('#movie_player .yt-snip-host');
+      return !!host.shadowRoot.querySelector('.snip-timeline, .snip-tl-band');
+    });
+    expect(mainBarOverlay).toBe(false);
+
+    // …and the scrubber overlays YouTube's progress bar instead (centered
+    // on it; the pill is taller than the native line and may overhang).
+    const scrub = await h.shadowRect(page, '.snip-scrub');
+    const barTop = await page.evaluate(() =>
+      document.querySelector('#movie_player .ytp-progress-bar').getBoundingClientRect().top);
+    expect(scrub.display).toBe('block');
+    expect(scrub.top).toBeGreaterThanOrEqual(barTop - 8);
+    expect(scrub.top + scrub.height).toBeLessThanOrEqual(barTop + 8 + 13);
   });
 
   test('dragging the preview timeline handle seeks the video', async ({ page }) => {
