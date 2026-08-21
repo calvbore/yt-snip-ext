@@ -13,10 +13,11 @@ const { expect } = require('@playwright/test');
 const WATCH_URL = 'http://127.0.0.1:8123/watch';
 
 /** Navigate to the harness, wait for the video + button, and prime options. */
-async function openWatch(page, { media, options } = {}) {
-  let url = WATCH_URL;
-  if (media) url += '?media=' + encodeURIComponent(media);
-  await page.goto(url, { waitUntil: 'load' });
+async function openWatch(page, { media, options, query } = {}) {
+  const params = new URLSearchParams(query || {});
+  if (media) params.set('media', media);
+  const qs = params.toString();
+  await page.goto(WATCH_URL + (qs ? '?' + qs : ''), { waitUntil: 'load' });
   if (options) {
     await page.evaluate((opts) => {
       window.__ytSnipStorage = Object.assign({}, opts);
@@ -87,6 +88,40 @@ async function getClip(page) {
   return page.evaluate(() => window.ytSnip._getClip());
 }
 
+async function getZoom(page) {
+  return page.evaluate(() => window.ytSnip._getZoom());
+}
+
+/**
+ * Drag a detail-strip handle to `targetFrac` of the strip (window-aware).
+ * Uses the real mouse so pointer capture works, like dragTimelineHandle.
+ */
+async function dragZoomHandle(page, role, targetFrac) {
+  const pos = await page.evaluate((arg) => {
+    const host = document.querySelector('#movie_player .yt-snip-host');
+    const strip = host.shadowRoot.querySelector('.snip-zoom');
+    const handle = strip ? strip.querySelector('.snip-tl-handle[data-role="' + arg.role + '"]') : null;
+    if (!handle) return null;
+    const h = handle.getBoundingClientRect();
+    const s = strip.getBoundingClientRect();
+    return { x1: h.left + h.width / 2, y: h.top + h.height / 2, x2: s.left + s.width * arg.frac };
+  }, { role, frac: targetFrac });
+  expect(pos).not.toBeNull();
+  await mouseDrag(page, pos.x1, pos.y, pos.x2, pos.y);
+}
+
+/** Click a detail-strip control button ('+', '−', 'Fit'). */
+async function clickZoomCtl(page, label) {
+  return page.evaluate((lbl) => {
+    const host = document.querySelector('#movie_player .yt-snip-host');
+    const buttons = host.shadowRoot.querySelectorAll('.snip-zl-ctl button');
+    for (const b of buttons) {
+      if (b.textContent.includes(lbl)) { b.click(); return true; }
+    }
+    return false;
+  }, label);
+}
+
 async function clickToolbar(page, label) {
   const btn = await shadowQuery(page, '.snip-toolbar button');
   // Find the button whose text matches label.
@@ -151,7 +186,10 @@ module.exports = {
   dragSelect,
   getSelection,
   getClip,
-  clickToolbar,
+  getZoom,
   dragTimelineHandle,
+  dragZoomHandle,
+  clickZoomCtl,
+  clickToolbar,
   saveAndGetMessage,
 };

@@ -13,6 +13,13 @@
       "id": "yt-snip@localhost"
     }
   },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "96": "icons/icon96.png",
+    "128": "icons/icon128.png"
+  },
   "content_scripts": [
     {
       "matches": ["*://*.youtube.com/*"],
@@ -45,6 +52,14 @@
     "open_in_tab": false
   },
   "action": {
-    "default_title": "yt-snip settings"
+    "default_title": "yt-snip settings",
+    "default_icon": {
+      "16": "icons/theme-icon16-dark.png",
+      "32": "icons/theme-icon32-dark.png"
+    },
+    "theme_icons": [
+      { "size": 16, "light": "icons/theme-icon16-light.png", "dark": "icons/theme-icon16-dark.png" },
+      { "size": 32, "light": "icons/theme-icon32-light.png", "dark": "icons/theme-icon32-dark.png" }
+    ]
   }
 }

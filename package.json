@@ -17,12 +17,14 @@
     "test:fast": "npm run test:unit && npm run test:e2e",
     "test": "npm run test:unit && npm run test:e2e && npm run test:smoke && npm run test:ext",
     "test:fixture": "node test/fixtures/synth.mjs",
-    "harness:refresh": "node test/fixtures/record-harness.mjs"
+    "harness:refresh": "node test/fixtures/record-harness.mjs",
+    "dev": "web-ext run --source-dir ."
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
     "geckodriver": "^5.0.0",
     "omggif": "^1.0.10",
-    "selenium-webdriver": "^4.27.0"
+    "selenium-webdriver": "^4.27.0",
+    "web-ext": "^10.6.0"
   }
 }

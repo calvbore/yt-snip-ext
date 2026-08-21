@@ -169,11 +169,13 @@ test.describe('timeline handles and loop', () => {
       document.querySelector('video.html5-main-video').currentTime = 5 - 0.01;
     });
 
-    // The loop guard must snap playback back to the clip start.
+    // The loop guard must snap playback back to the clip start. rAF-paced
+    // polling: after the wrap, playback re-advances past any fixed tolerance
+    // within ~300ms, so slower poll cadences intermittently miss it.
     const start = clip.start;
-    await expect.poll(() => page.evaluate((s) => {
+    await page.waitForFunction((s) => {
       const v = document.querySelector('video.html5-main-video');
       return Math.abs(v.currentTime - s) < 0.3;
-    }, start), { timeout: 3000, intervals: [50, 50, 50] }).toBe(true);
+    }, start, { timeout: 8000, polling: 'raf' });
   });
 });

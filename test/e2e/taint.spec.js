@@ -43,6 +43,11 @@ test('cross-origin media uses the fallback path and captures correctly', async (
     };
   });
 
+  // Mid-video seek keeps the M13 default clip (±3 s around activation) at
+  // the full fixture range — the frame-count assertion below assumes it.
+  await page.evaluate(() => {
+    document.querySelector('video.html5-main-video').currentTime = 2.5;
+  });
   await h.startSnip(page);
   await h.dragSelect(page, { x: 0, y: 0 }, { x: 640, y: 360 });
 

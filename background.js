@@ -234,3 +234,17 @@ if (typeof browser !== 'undefined' && browser && browser.runtime) {
     return keepOpen;
   });
 }
+
+/*
+ * Toolbar button (manifest `action`): open the settings page. The icon
+ * follows the browser theme via the manifest's `theme_icons`.
+ */
+if (typeof browser !== 'undefined' && browser && browser.action && browser.action.onClicked) {
+  browser.action.onClicked.addListener(function () {
+    browser.runtime.openOptionsPage();
+  });
+} else if (typeof chrome !== 'undefined' && chrome && chrome.action && chrome.action.onClicked) {
+  chrome.action.onClicked.addListener(function () {
+    chrome.runtime.openOptionsPage();
+  });
+}

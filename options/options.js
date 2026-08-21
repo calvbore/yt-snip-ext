@@ -25,6 +25,9 @@
     document.getElementById('fps').value = opts.fps;
     document.getElementById('maxDimension').value = opts.maxDimension;
     document.getElementById('saveAs').checked = opts.saveAs;
+    document.getElementById('loopOnPlay').checked = opts.loopOnPlay;
+    document.getElementById('clipPadStart').value = opts.clipPadStart;
+    document.getElementById('clipPadEnd').value = opts.clipPadEnd;
   }).catch(function (e) {
     flash('Could not load settings: ' + e.message, false);
   });
@@ -34,18 +37,33 @@
     var fps = parseInt(document.getElementById('fps').value, 10);
     var maxDimension = parseInt(document.getElementById('maxDimension').value, 10);
     var saveAs = document.getElementById('saveAs').checked;
-    var normalized = ytSnipOptions.resolve({ fps: fps, maxDimension: maxDimension, saveAs: saveAs });
+    var loopOnPlay = document.getElementById('loopOnPlay').checked;
+    var clipPadStart = parseInt(document.getElementById('clipPadStart').value, 10);
+    var clipPadEnd = parseInt(document.getElementById('clipPadEnd').value, 10);
+    var normalized = ytSnipOptions.resolve({
+      fps: fps,
+      maxDimension: maxDimension,
+      saveAs: saveAs,
+      loopOnPlay: loopOnPlay,
+      clipPadStart: clipPadStart,
+      clipPadEnd: clipPadEnd,
+    });
 
     ytSnipStorage.set({
       fps: normalized.fps,
       maxDimension: normalized.maxDimension,
       saveAs: normalized.saveAs,
+      loopOnPlay: normalized.loopOnPlay,
+      clipPadStart: normalized.clipPadStart,
+      clipPadEnd: normalized.clipPadEnd,
       format: normalized.format,
     }).then(function () {
       flash('Settings saved', true);
       // reflect clamped values back into the form
       document.getElementById('fps').value = normalized.fps;
       document.getElementById('maxDimension').value = normalized.maxDimension;
+      document.getElementById('clipPadStart').value = normalized.clipPadStart;
+      document.getElementById('clipPadEnd').value = normalized.clipPadEnd;
     }).catch(function (err) {
       flash('Could not save settings: ' + err.message, false);
     });

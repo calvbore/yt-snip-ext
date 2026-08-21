@@ -19,7 +19,8 @@ function makeVideo({ currentTime = 42.5, paused = true } = {}) {
 }
 
 // The full permutation matrix: entry point × exit path × initial play/pause.
-// Every disengage (and the successful save) must restore currentTime + play state.
+// Every exit restores currentTime and ends PAUSED (M13 rule: closing the tool
+// by any path leaves the video paused, even if it was playing on activation).
 const EXITS = {
   'save (complete)': (m) => m.save() && m.complete(),
   'esc': (m) => m.disengage('esc'),
@@ -59,7 +60,7 @@ for (const [entryName, entry] of Object.entries(ENTRIES)) {
         exit(machine);
         assert.equal(machine.getState(), 'idle');
         assert.equal(video.currentTime, 33.3, 'currentTime restored');
-        assert.equal(video.paused, paused, 'play state restored');
+        assert.equal(video.paused, true, 'any exit ends paused');
         assert.equal(machine.getActivation(), null);
       });
     }
@@ -101,7 +102,7 @@ test('state: disengage from activating/selecting also restores', () => {
   machine.disengage('esc');
   assert.equal(machine.getState(), 'idle');
   assert.equal(video.currentTime, 8);
-  assert.equal(video.paused, false);
+  assert.equal(video.paused, true, 'ends paused even if playing on activation');
 });
 
 test('state: onChange is notified after each transition', () => {

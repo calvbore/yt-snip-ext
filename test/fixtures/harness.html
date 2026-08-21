@@ -106,6 +106,19 @@
       var params = new URLSearchParams(location.search);
       if (params.get('bare')) return;
 
+      // Test seam: ?duration=<seconds> fakes a long video by overriding the
+      // media element's duration getter before the content scripts load. The
+      // underlying fixture stays 5s — zoom/trim specs assert clip math, not
+      // playback, so the real media length is irrelevant there.
+      var fakeDuration = parseFloat(params.get('duration'));
+      if (fakeDuration > 0) {
+        var v = document.querySelector('video.html5-main-video');
+        Object.defineProperty(v, 'duration', {
+          get: function () { return fakeDuration; },
+          configurable: true,
+        });
+      }
+
       window.__ytSnipMessages = [];
       window.__ytSnipStorage = {};
       window.browser = {

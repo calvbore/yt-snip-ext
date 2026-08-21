@@ -28,6 +28,24 @@
         <span class="field-label">Ask where to save each clip</span>
       </label>
 
+      <label class="field check">
+        <input type="checkbox" id="loopOnPlay">
+        <span class="field-label">Loop the selection when I press play</span>
+        <span class="hint">While snipping, starting playback loops within your clip for previewing. Turn off to loop only via the Loop button.</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Selection start padding (s)</span>
+        <input type="number" id="clipPadStart" min="0" max="600" step="1" required>
+        <span class="hint">When you open the tool, the start handle is placed this many seconds before where the video was (0–600).</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Selection end padding (s)</span>
+        <input type="number" id="clipPadEnd" min="0" max="600" step="1" required>
+        <span class="hint">…and the end handle this many seconds after it.</span>
+      </label>
+
       <div class="actions">
         <button type="submit" class="primary">Save</button>
         <span id="status" class="status" aria-live="polite"></span>

@@ -10,16 +10,22 @@ test('options: defaults when nothing stored', () => {
     fps: 12,
     maxDimension: 512,
     saveAs: false,
+    loopOnPlay: true,
+    clipPadStart: 3,
+    clipPadEnd: 3,
     format: 'gif',
   });
   assert.deepEqual(options.resolve(null), options.DEFAULTS);
 });
 
 test('options: passes through valid values', () => {
-  assert.deepEqual(options.resolve({ fps: 20, maxDimension: 640, saveAs: true }), {
+  assert.deepEqual(options.resolve({ fps: 20, maxDimension: 640, saveAs: true, loopOnPlay: false, clipPadStart: 1, clipPadEnd: 5 }), {
     fps: 20,
     maxDimension: 640,
     saveAs: true,
+    loopOnPlay: false,
+    clipPadStart: 1,
+    clipPadEnd: 5,
     format: 'gif',
   });
 });
@@ -38,12 +44,41 @@ test('options: clamps maxDimension into [64, 8000]', () => {
   assert.equal(options.resolve({ maxDimension: 300 }).maxDimension, 300);
 });
 
+test('options: clip pads clamp into [0, 600] independently', () => {
+  // Defaults are the M14 behavior (3 s each side).
+  assert.equal(options.resolve({}).clipPadStart, 3);
+  assert.equal(options.resolve({}).clipPadEnd, 3);
+  // Independent values pass through.
+  assert.equal(options.resolve({ clipPadStart: 1 }).clipPadStart, 1);
+  assert.equal(options.resolve({ clipPadEnd: 10 }).clipPadEnd, 10);
+  // Zero is legitimate (handle parked at the activation timestamp).
+  assert.equal(options.resolve({ clipPadStart: 0 }).clipPadStart, 0);
+  assert.equal(options.resolve({ clipPadEnd: 0 }).clipPadEnd, 0);
+  // Out-of-range and garbage clamp per side.
+  assert.equal(options.resolve({ clipPadStart: -5 }).clipPadStart, 0);
+  assert.equal(options.resolve({ clipPadEnd: -1 }).clipPadEnd, 0);
+  assert.equal(options.resolve({ clipPadStart: 9999 }).clipPadStart, 600);
+  assert.equal(options.resolve({ clipPadEnd: 'abc' }).clipPadEnd, 0);
+});
+
 test('options: saveAs accepts several truthy encodings', () => {
   assert.equal(options.resolve({ saveAs: true }).saveAs, true);
   assert.equal(options.resolve({ saveAs: 'true' }).saveAs, true);
   assert.equal(options.resolve({ saveAs: 1 }).saveAs, true);
   assert.equal(options.resolve({ saveAs: false }).saveAs, false);
   assert.equal(options.resolve({ saveAs: 'yes' }).saveAs, false);
+});
+
+test('options: loopOnPlay defaults on and only explicit falsy turns it off', () => {
+  assert.equal(options.resolve({}).loopOnPlay, true);
+  assert.equal(options.resolve({ loopOnPlay: true }).loopOnPlay, true);
+  assert.equal(options.resolve({ loopOnPlay: 'true' }).loopOnPlay, true);
+  assert.equal(options.resolve({ loopOnPlay: 1 }).loopOnPlay, true);
+  assert.equal(options.resolve({ loopOnPlay: 'yes' }).loopOnPlay, true); // not an explicit falsy
+  assert.equal(options.resolve({ loopOnPlay: false }).loopOnPlay, false);
+  assert.equal(options.resolve({ loopOnPlay: 'false' }).loopOnPlay, false);
+  assert.equal(options.resolve({ loopOnPlay: 0 }).loopOnPlay, false);
+  assert.equal(options.resolve({ loopOnPlay: null }).loopOnPlay, false);
 });
 
 test('options: unknown format falls back to gif', () => {

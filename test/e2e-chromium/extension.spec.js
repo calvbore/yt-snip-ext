@@ -36,7 +36,7 @@ const HARNESS_URL = 'http://127.0.0.1:8123/watch?bare=1&play=1';
 
 async function buildCrxDir() {
   const tmp = path.join(await fs.promises.mkdtemp(path.join(os.tmpdir(), 'yt-snip-crx-')), 'crx');
-  for (const item of ['background.js', 'content', 'lib', 'options', 'offscreen.html', 'offscreen.js']) {
+  for (const item of ['background.js', 'content', 'lib', 'options', 'offscreen.html', 'offscreen.js', 'icons']) {
     await fs.promises.cp(path.join(ROOT, item), path.join(tmp, item), { recursive: true });
   }
   await fs.promises.copyFile(

@@ -80,8 +80,11 @@ function expectedMarkerSourceX(media) {
 test.describe('full-frame capture', () => {
   test('saves a valid, correctly-timed GIF with restored state', async ({ page }) => {
     await h.openWatch(page, { options: { fps: 1, maxDimension: 256 } });
+    // Seek mid-video so the M13 default clip (±3 s around activation,
+    // clamped) still covers the full fixture — the frame-count and barcode
+    // math below assume the whole 5 s range.
     await page.evaluate(async () => {
-      document.querySelector('video.html5-main-video').currentTime = 1.5;
+      document.querySelector('video.html5-main-video').currentTime = 2.5;
     });
 
     await h.startSnip(page);
@@ -125,7 +128,7 @@ test.describe('full-frame capture', () => {
     // restored to its pre-activation time.
     await expect.poll(() => page.evaluate(() => window.ytSnip._getState())).toBe('idle');
     const restored = await page.evaluate(() => document.querySelector('video.html5-main-video').currentTime);
-    expect(Math.abs(restored - 1.5) < 0.05).toBe(true);
+    expect(Math.abs(restored - 2.5) < 0.05).toBe(true);
   });
 });
 
@@ -133,6 +136,11 @@ test.describe('crop region capture', () => {
   test('GIF content matches only the snipped rectangle', async ({ page }) => {
     // Snip the top-left quadrant: x 0..320, y 0..90 (source px).
     await h.openWatch(page, { options: { fps: 1, maxDimension: 512 } });
+    // Mid-video seek keeps the M13 default clip at the full fixture range
+    // (the marker-sweep assertions below assume it).
+    await page.evaluate(() => {
+      document.querySelector('video.html5-main-video').currentTime = 2.5;
+    });
     await h.startSnip(page);
     await h.dragSelect(page, { x: 0, y: 0 }, { x: 320, y: 90 });
 

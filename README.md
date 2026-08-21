@@ -11,7 +11,8 @@ GIF that Anki's media manager can ingest directly.
   class while the tool is open. All tool UI lives in a shadow DOM inside
   `#movie_player`.
 - State-transition rule: whenever the tool is disengaged (escape, save, error),
-  the video returns to the timestamp it was at when the tool was activated.
+  the video returns to the timestamp it was at when the tool was activated and
+  is left paused.
 
 ## Install (unpacked extension)
 
@@ -21,7 +22,8 @@ packaging pipeline.
 Firefox:
 
 1. `about:debugging` → *Load Temporary Add-on* → select `manifest.json`.
-2. Open `about:addons` → yt-snip → Preferences if you want to tweak settings.
+2. Open `about:addons` → yt-snip → Preferences if you want to tweak settings
+   (the toolbar icon opens the same page).
 
 Chromium:
 
@@ -33,13 +35,35 @@ Chromium:
 1. On any YouTube watch page, click the snip button next to the player chrome
    (top-right of the controls).
 2. Drag a rectangle over the video — that's the crop. Resize handles let you
-   fine-tune it once drawn.
-3. The timeline under the player shows start/preview/end handles. Drag them to
-   narrow or extend the time window.
-4. The loop button toggles looping playback of the window while you scrub.
-5. Click **Save**. The clip is encoded in-page and handed to the extension
+   fine-tune it once drawn, and dragging the rectangle's body moves the whole
+   crop without resizing it.
+3. The timeline under the player shows start/preview/end handles, pre-placed
+   a few seconds around where the video was when you activated the tool. Drag
+   them to narrow or extend the time window; while you drag a start/end
+   handle the video scrubs along with it, and the playhead parks at that edge
+   on release. The thin **white tick** marks where the video was when you
+   activated the tool — the yellow head shows the live position, the tick
+   never moves, and leaving the tool returns the video to it.
+4. On long videos, use the **detail strip** just above the progress bar: it
+   shows a magnified zoom window with its own start/preview/end handles.
+   `+` / `−` zoom around the center of the view, the mouse wheel zooms at the
+   cursor, dragging the strip's body pans the window, and **Fit** resets it to
+   the whole video. Dragging a handle on the main bar re-fits the window
+   around your selection automatically. The thin **minimap** between the strip
+   and the progress bar always shows where your clip (blue band) and zoom
+   window (yellow bracket) sit in the full video — click or drag it to jump
+   the window anywhere.
+5. Pressing **play by any means** (YouTube's button, spacebar, `k`) loops
+   playback within your selection so you can preview it (disable via the
+   *Loop on play* option; the Loop button is always a manual override). The
+   preview head follows playback on both timelines.
+6. Switching windows/tabs never ends a snip session — only Esc, **Exit**,
+   saving, or navigating away do.
+7. Click **Save**. The clip is encoded in-page and handed to the extension
    background, which downloads it to your OS Downloads folder as
-   `yt-snip-<title>-<timestamp>.gif`.
+   `yt-snip-<title>-<timestamp>.gif`. Saving — or leaving the tool any other
+   way — returns the video to where it was when you started and leaves it
+   paused.
 
 The saved GIF loops infinitely (NETSCAPE extension), so it plays correctly as
 an Anki media file.
@@ -51,6 +75,9 @@ an Anki media file.
 | Frames per second | Capture rate of the saved clip (1–60; lower is smaller). |
 | Max dimension (px) | Long edge of the output; the short edge scales with the crop, keeping the clip Anki-friendly. |
 | Ask where to save each clip | Prompt for a location instead of auto-downloading. |
+| Loop on play | While snipping, pressing play loops within the selection instead of playing through it (on by default). |
+| Selection start padding (s) | Where the start handle sits when you open the tool: this many seconds before the video's current position (0–600; default 3). |
+| Selection end padding (s) | Where the end handle sits: this many seconds after the video's current position (0–600; default 3). |
 
 ## Development
 
@@ -59,11 +86,13 @@ Requirements: Node.js ≥ 20 (`.nvmrc`), Firefox for the e2e tier, `ffmpeg`
 
 | Command | What it runs |
 | --- | --- |
+| `npm run dev` | Launch a throwaway Firefox with the extension temporarily installed and **auto-reload the add-on on every file save** (web-ext watch; no build step). Content-script changes still need an F5 on the tab. Useful flags: `-- --firefox-profile=<name> --keep-profile-changes` to reuse a profile (persist YouTube consent/login across runs), `--args="--headless"`, `-f <path-to-firefox>` to pin a binary. Chromium has no equivalent — reload manually via `chrome://extensions`. |
 | `npm test` | Full pre-packaging suite: unit + coverage gate ≥ 90% on `lib/*`, Tier 1 Firefox e2e (DOM/UI on a synthesized time-coded fixture), Tier 2 Firefox extension + downloads smoke (`test:smoke`), Tier 3 Chromium extension full-flow (`test:ext`). |
 | `npm run test:fast` | Unit + Tier 1 e2e. |
 | `npm run test:yt` | Tier 3 opt-in live-YouTube check against a real watch page. Set `RUN_REAL_YT=1` (flaky by nature; run before release, not on every MR). |
 | `npm run test:fixture` | (Re)synthesize the media fixture (`test/.fixtures/current/media.webm`). |
 | `npm run harness:refresh` | Re-record the YouTube player chrome snapshot the harness embeds. |
+| `node icons/generate.mjs` | Regenerate the extension icons (`icons/*.png`) from the glyph in that script after changing its geometry; commit the outputs. |
 
 `npm test` bootstraps the gitignored media fixture automatically (a Playwright
 `globalSetup`), so a fresh checkout works without manual steps.

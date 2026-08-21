@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#0f9dff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Selection-marquee corner brackets -->
+  <path d="M8 3 H5 Q3 3 3 5 V8"/>
+  <path d="M16 3 H19 Q21 3 21 5 V8"/>
+  <path d="M21 16 V19 Q21 21 19 21 H16"/>
+  <path d="M8 21 H5 Q3 21 3 19 V16"/>
+  <!-- Scissors centered inside (Feather geometry scaled x0.6 about 12,12) -->
+  <circle cx="9.6" cy="9.6" r="1.8"/>
+  <circle cx="9.6" cy="14.4" r="1.8"/>
+  <path d="M16.8 7.2 L9.67 14.33"/>
+  <path d="M13.49 13.49 L16.8 16.8"/>
+  <path d="M9.67 9.67 L12 12"/>
+</svg>
