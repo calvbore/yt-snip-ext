@@ -9,6 +9,10 @@ test/.playwright/
 test-results/
 playwright-report/
 
+# packaged builds + AMO signing secrets (never commit; see README "Install permanently")
+dist/
+.amo.env
+
 # archived Tier-2 env investigation scripts (kept locally as evidence; see PLAN.md session log)
 test/smoke/debug/
 

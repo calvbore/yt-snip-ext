@@ -18,7 +18,8 @@
     "test": "npm run test:unit && npm run test:e2e && npm run test:smoke && npm run test:ext",
     "test:fixture": "node test/fixtures/synth.mjs",
     "harness:refresh": "node test/fixtures/record-harness.mjs",
-    "dev": "web-ext run --source-dir ."
+    "dev": "web-ext run --source-dir .",
+    "package": "web-ext build --source-dir . --artifacts-dir dist --overwrite-dest"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

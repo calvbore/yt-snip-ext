@@ -16,9 +16,6 @@ GIF that Anki's media manager can ingest directly.
 
 ## Install (unpacked extension)
 
-This is a personal, private-use project — there is no store submission and no
-packaging pipeline.
-
 Firefox:
 
 1. `about:debugging` → *Load Temporary Add-on* → select `manifest.json`.
@@ -29,6 +26,32 @@ Chromium:
 
 1. `chrome://extensions` → enable *Developer mode* → *Load unpacked* → select
    this directory.
+
+## Install permanently (regular Firefox)
+
+A temporary add-on is wiped every time Firefox restarts, and release builds of
+Firefox refuse permanently-installed extensions unless Mozilla has signed
+them. To install yt-snip for real, get a signed build via AMO
+(addons.mozilla.org) self-distribution — nothing is published publicly and no
+review wait applies to basic validation:
+
+1. Package the runtime files: `npm run package` → `dist/yt-snip-<version>.zip`
+2. Sign it, either way works:
+   - **Web upload (no API keys):** sign in at addons.mozilla.org →
+     *Developer Hub* → *Submit a New Add-on* → *On your own* (self-
+     distribution) → upload the zip → download the returned **signed .xpi**.
+   - **CLI:** create API keys under *Developer Hub → Manage API Keys*, store
+     them in an untracked `.amo.env` (`AMO_API_KEY=…`, `AMO_API_SECRET=…`),
+     then `source .amo.env && npx web-ext sign --channel=unlisted \
+     --api-key=$AMO_API_KEY --api-secret=$AMO_API_SECRET --artifacts-dir dist`
+3. In Firefox: `about:addons` → ⚙ gear menu → *Install Add-on From File…* →
+   pick the signed `.xpi`. It now survives restarts like any store add-on.
+
+Notes: unlisted builds don't auto-update — bump `version` in `manifest.json`
+and re-sign to upgrade (AMO rejects re-uploading an identical version). The
+`gecko.id` needed for signing is already in the manifest. On Developer
+Edition / Nightly / ESR you can skip signing entirely by setting
+`xpinstall.signatures.required = false` in `about:config`.
 
 ## Usage
 

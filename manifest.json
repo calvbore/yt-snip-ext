@@ -10,7 +10,10 @@
   ],
   "browser_specific_settings": {
     "gecko": {
-      "id": "yt-snip@localhost"
+      "id": "yt-snip@localhost",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   },
   "icons": {
