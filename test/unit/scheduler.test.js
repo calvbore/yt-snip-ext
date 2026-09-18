@@ -101,3 +101,90 @@ test('scheduler: aborts when waitRendered returns null', async () => {
   for await (const f of scheduledFrames(source, { start: 0, end: 5, fps: 1 })) frames.push(f);
   assert.equal(frames.length, 1); // first frame (t=0) then abort
 });
+
+/* ---- M17 hold mode (slow motion) ----------------------------------- */
+
+test('scheduler: hold mode emits repeated mediaTimes as separate samples', () => {
+  return (async () => {
+    // Coarse keyframes: every seek within a 1 s keyframe interval lands on the
+    // same mediaTime. Default mode dedups (1 sample); hold mode must emit one
+    // sample per target so slow-mo doesn't collapse to 1×.
+    const seeks = [];
+    const source = {
+      seeks,
+      async seek(t) { seeks.push(t); source._land = Math.floor(t); },
+      async waitRendered() { return source._land; },
+    };
+    const frames = [];
+    for await (const f of scheduledFrames(source, { start: 0, end: 3, fps: 5, hold: true })) {
+      frames.push(f);
+    }
+    assert.equal(frames.length, 16); // targets 0..3 step 0.2
+    // The slow-mo timeline: media stays flat per keyframe and strictly
+    // increases across keyframe boundaries.
+    const media = frames.map((f) => f.media);
+    for (let k = 1; k < media.length; k++) {
+      assert.ok(media[k] >= media[k - 1], 'media went backwards in hold mode');
+    }
+    assert.deepEqual(
+      Array.from(new Set(media)),
+      [0, 1, 2, 3]
+    );
+  })();
+});
+
+test('scheduler: hold mode advances the target strictly by dt (no jump-past)', () => {
+  return (async () => {
+    const seeks = [];
+    const source = {
+      seeks,
+      async seek(t) { seeks.push(t); source._land = t; },
+      async waitRendered() { return source._land; },
+    };
+    const targets = [];
+    for await (const f of scheduledFrames(source, { start: 0, end: 1, fps: 4, hold: true })) {
+      targets.push(f.target);
+    }
+    assert.deepEqual(targets, [0, 0.25, 0.5, 0.75, 1]);
+  })();
+});
+
+test('scheduler: hold mode still breaks on null renders and out-of-window jumps', () => {
+  return (async () => {
+    let calls = 0;
+    const source = {
+      async seek() { calls++; },
+      async waitRendered() { return calls === 3 ? null : Math.floor(calls - 1); },
+    };
+    const frames = [];
+    for await (const f of scheduledFrames(source, { start: 0, end: 5, fps: 1, hold: true })) {
+      frames.push(f);
+    }
+    assert.equal(frames.length, 2); // two samples, then the null abort
+
+    const far = {
+      async seek() { far._land = 99; },
+      async waitRendered() { return far._land; },
+    };
+    const none = [];
+    for await (const f of scheduledFrames(far, { start: 0, end: 2, fps: 2, hold: true })) none.push(f);
+    assert.equal(none.length, 0);
+  })();
+});
+
+test('scheduler: default mode is unchanged (no hold option)', () => {
+  return (async () => {
+    const seeks = [];
+    const source = {
+      seeks,
+      async seek(t) { seeks.push(t); source._land = Math.floor(t); },
+      async waitRendered() { return source._land; },
+    };
+    const frames = [];
+    for await (const f of scheduledFrames(source, { start: 0, end: 3, fps: 5 })) {
+      frames.push(f);
+    }
+    assert.equal(frames.length, 3); // the pre-M17 dedup behavior
+    assert.deepEqual(frames.map((f) => f.media), [0, 1, 2]);
+  })();
+});

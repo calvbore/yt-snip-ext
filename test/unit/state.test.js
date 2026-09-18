@@ -45,7 +45,7 @@ for (const [entryName, entry] of Object.entries(ENTRIES)) {
         // enter the flow from idle
         assert.equal(machine.request(entryName === 'shortcut' ? 'shortcut' : 'button'), true);
         assert.equal(machine.getState(), 'activating');
-        assert.deepEqual(machine.getActivation(), { currentTime: 33.3, paused });
+        assert.deepEqual(machine.getActivation(), { currentTime: 33.3, paused, playbackRate: undefined });
 
         // walk to a fully engaged state so every exit path is reachable
         machine.startSelect();
@@ -127,4 +127,36 @@ test('state: lastReason records the disengage cause', () => {
 
 test('state: requires a video adapter', () => {
   assert.throws(() => state.create(null), /video adapter/);
+});
+
+/* ---- M17 playback-rate restore ------------------------------------- */
+
+test('state: any exit restores the activation playbackRate (speed preview undone)', () => {
+  for (const exitName of ['esc', 'save (complete)', 'spa-nav']) {
+    const video = makeVideo({ currentTime: 10, paused: true });
+    video.playbackRate = 1.25; // the user's own rate before the session
+    const machine = state.create(video);
+    machine.request();
+    machine.startSelect();
+    machine.finishSelect();
+    // The speed preview mutated the rate mid-session.
+    video.playbackRate = 4;
+    if (exitName === 'save (complete)') {
+      machine.save();
+      machine.complete();
+    } else {
+      machine.disengage(exitName);
+    }
+    assert.equal(machine.getState(), 'idle');
+    assert.equal(video.playbackRate, 1.25, 'rate restored on ' + exitName);
+  }
+});
+
+test('state: adapters without a playbackRate are left alone (backward compatible)', () => {
+  const video = makeVideo({ currentTime: 3, paused: true }); // no playbackRate field
+  const machine = state.create(video);
+  machine.request();
+  machine.disengage('esc');
+  assert.equal(machine.getState(), 'idle');
+  assert.equal('playbackRate' in video, false);
 });

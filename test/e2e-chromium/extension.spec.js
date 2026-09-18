@@ -26,6 +26,7 @@ const { test, expect } = require('@playwright/test');
 const { chromium } = require('@playwright/test');
 
 const { decodeGif } = require('../helpers/gif-validate');
+const { validateWebm } = require('../helpers/webm-validate');
 
 const ROOT = path.join(__dirname, '..', '..');
 // `bare=1` = no page-side stubs (the real extension injects into an isolated
@@ -62,7 +63,9 @@ async function waitForDownload(downloadDir) {
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     const files = await fs.promises.readdir(downloadDir);
-    const matches = files.filter((f) => f.endsWith('.gif') && !f.endsWith('.crdownload'));
+    const matches = files.filter(
+      (f) => (f.endsWith('.gif') || f.endsWith('.webm')) && !f.endsWith('.crdownload')
+    );
     if (matches.length > 0) {
       const withMtime = await Promise.all(
         matches.map(async (m) => ({
@@ -78,7 +81,7 @@ async function waitForDownload(downloadDir) {
   return null;
 }
 
-test('extension injects, snips, and saves a decodable GIF to the OS download folder', async () => {
+test('extension injects, snips, and saves a decodable clip to the OS download folder', async () => {
   const crx = await buildCrxDir();
   const downloadDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'yt-snip-crx-dl-'));
   const userDataDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'yt-snip-crx-profile-'));
@@ -115,7 +118,7 @@ test('extension injects, snips, and saves a decodable GIF to the OS download fol
 
     // Headless Chromium ignores `downloads.download`'s `filename` (even for
     // http: URLs — the on-disk name comes from Content-Disposition / the URL),
-    // so poll the dir for any new .gif and validate the CONTENT, not the name.
+    // so poll the dir for any new clip and validate the CONTENT, not the name.
     // Named, Anki-ready files are verified in real Firefox by the B1 smoke.
 
     await expect(page.locator('button.yt-snip-trigger')).toBeVisible({ timeout: 20000 });
@@ -153,21 +156,32 @@ test('extension injects, snips, and saves a decodable GIF to the OS download fol
     });
     expect(saved, 'Save button not found in the extension shadow root').toBe(true);
 
-    const gifFile = await waitForDownload(downloadDir);
-    expect(gifFile, 'no GIF download landed on disk').toBeTruthy();
+    const clipFile = await waitForDownload(downloadDir);
+    expect(clipFile, 'no clip download landed on disk').toBeTruthy();
 
-    const bytes = new Uint8Array(await fs.promises.readFile(gifFile));
+    const bytes = new Uint8Array(await fs.promises.readFile(clipFile));
     expect(bytes.length).toBeGreaterThan(64);
-    expect(Buffer.from(bytes.subarray(0, 6)).toString('ascii')).toBe('GIF89a');
-    const gif = decodeGif(bytes);
-    expect(gif.width).toBeGreaterThan(0);
-    expect(gif.height).toBeGreaterThan(0);
-    // Headless Chromium only renders ~1–2 fps, so the seek-lenient sweep
-    // yields just a couple of distinct frames here (sometimes only one).
-    // Frame fidelity (>= 5 distinct frames) is asserted in the Firefox Tier-1
-    // e2e and in unit tests; this test proves the full chain (capture →
-    // encode → SW → offscreen blob → downloads API → disk → decodable GIF).
-    expect(gif.frames.length).toBeGreaterThanOrEqual(1);
+    // The default output format is WebM (M16); GIF remains the fallback when
+    // the browser lacks WebCodecs. Validate whichever container landed.
+    if (clipFile.endsWith('.webm')) {
+      const v = await validateWebm(bytes);
+      expect(v.width).toBeGreaterThan(0);
+      expect(v.height).toBeGreaterThan(0);
+      expect(v.packets.length).toBeGreaterThanOrEqual(1);
+      expect(['vp8', 'vp9', 'av1']).toContain(v.codec);
+    } else {
+      expect(Buffer.from(bytes.subarray(0, 6)).toString('ascii')).toBe('GIF89a');
+      const gif = decodeGif(bytes);
+      expect(gif.width).toBeGreaterThan(0);
+      expect(gif.height).toBeGreaterThan(0);
+      // Headless Chromium only renders ~1–2 fps, so the seek-lenient sweep
+      // yields just a couple of distinct frames here (sometimes only one).
+      // Frame fidelity (>= 5 distinct frames) is asserted in the Firefox
+      // Tier-1 e2e and in unit tests; this test proves the full chain
+      // (capture → encode → SW → offscreen blob → downloads API → disk →
+      // decodable file).
+      expect(gif.frames.length).toBeGreaterThanOrEqual(1);
+    }
 
     // State-transition rule: tool returned to idle (toolbar hidden) and the
     // video restored to its pre-activation timestamp.

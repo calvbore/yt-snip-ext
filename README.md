@@ -84,17 +84,43 @@ Edition / Nightly / ESR you can skip signing entirely by setting
 5. Pressing **play by any means** (YouTube's button, spacebar, `k`) loops
    playback within your selection so you can preview it (disable via the
    *Loop on play* option; the Loop button is always a manual override). The
-   preview head follows playback.
+   preview head follows playback. The **Speed** button sets the clip's
+   playback speed (0.25×–4× presets) — the loop preview runs at that speed
+   so you can watch exactly what will be saved; slow motion captures the
+   source at a proportionally higher rate, so a 0.25× clip takes about as
+   long to capture as a 4× longer clip.
 6. Switching windows/tabs never ends a snip session — only Esc, **Exit**,
-   saving, or navigating away do.
+   saving, or navigating away do. (Esc closes an open Speed menu first.)
 7. Click **Save**. The clip is encoded in-page and handed to the extension
    background, which downloads it to your OS Downloads folder as
-   `yt-snip-<title>-<timestamp>.gif`. Saving — or leaving the tool any other
-   way — returns the video to where it was when you started and leaves it
-   paused.
+   `yt-snip-<title>-<timestamp>.webm` (or `.gif`). Saving — or leaving the
+   tool any other way — returns the video to where it was when you started
+   (at its previous playback speed) and leaves it paused.
 
-The saved GIF loops infinitely (NETSCAPE extension), so it plays correctly as
-an Anki media file.
+### Output formats
+
+| | WebM (default) | GIF |
+| --- | --- | --- |
+| Color | **Truecolor** (VP9 video) — full color, no palette | 256 colors per frame (mitigated by dithering) |
+| AnkiDroid | ✓ always | ✓ always |
+| AnkiMobile (iOS) | iOS 17.4+ | ✓ all versions |
+| AnkiWeb / desktop (mpv) | ✓ | ✓ |
+| Auto-loop in Anki | needs a `<video loop>` embed (below) | ✓ automatic |
+| Browser support for encoding | Firefox 130+, Chrome 94+, Safari 16.4+ | all |
+
+WebM is the default because it preserves the video's actual colors — GIF's
+256-color palette visibly flattens gradients and blends small objects. GIF
+output is dithered (error-diffusion) by default to mask that, and remains
+selectable for maximum compatibility.
+
+**Auto-looping a WebM in Anki:** embed the clip in a card field with
+
+```html
+<video src="yt-snip-….webm" loop autoplay muted controls></video>
+```
+
+(`muted` lets mobile webviews honor `autoplay`; drop `controls` for a clean
+look, tap-to-play still works without the tag entirely.)
 
 ## Options
 
@@ -102,6 +128,8 @@ an Anki media file.
 | --- | --- |
 | Frames per second | Capture rate of the saved clip (1–60; lower is smaller). |
 | Max dimension (px) | Long edge of the output; the short edge scales with the crop, keeping the clip Anki-friendly. |
+| Format | WebM (truecolor, recommended) or GIF (universal). Browsers that can't encode WebM fall back to GIF automatically with a toast. |
+| Dither GIF colors | Error-diffusion dithering for GIF output — removes banding on smooth gradients (on by default; no effect on WebM). |
 | Ask where to save each clip | Prompt for a location instead of auto-downloading. |
 | Loop on play | While snipping, pressing play loops within the selection instead of playing through it (on by default). |
 | Selection start padding (s) | Where the start handle sits when you open the tool: this many seconds before the video's current position (0–600; default 3). |
@@ -130,8 +158,10 @@ Requirements: Node.js ≥ 20 (`.nvmrc`), Firefox for the e2e tier, `ffmpeg`
 ```
 lib/            pure, unit-tested modules (options, crop, timeline, state,
                 scheduler, messaging, filename, storage, saveflow)
+lib/vendor/     vendored third-party runtime (Mediabunny muxer, MPL-2.0)
 content/        content scripts: capture engine, fallback (CORS) capture,
-                GIF89a encoder, and the yt-snip integration (yt-snip.js)
+                GIF89a encoder (quantizer + LZW + dithering), WebM encoder
+                (WebCodecs VP9 → mediabunny), yt-snip integration
 background.js   receives encoded bytes; downloads the clip via downloads.download
 options/        options page
 test/           unit (Node), e2e (Playwright), smoke (Selenium), yt (Tier 3),

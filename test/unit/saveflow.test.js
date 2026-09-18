@@ -14,6 +14,9 @@ test('saveflow: clipParams assembles params with sane defaults', () => {
     start: 1.5,
     end: 3.5,
     fps: 12,
+    outputFps: 12,
+    speed: 1,
+    hold: false,
     crop: CROP,
     outW: 256,
     outH: 256,
@@ -47,6 +50,57 @@ test('saveflow: clipParams floors fps at 1', () => {
 test('saveflow: clipParams clamps end not below start', () => {
   const p = saveflow.clipParams({ start: 4, end: 1 }, 5, { fps: 12 }, CROP, OUT);
   assert.equal(p.end, 1);
+});
+
+/* ---- M17 playback speed: sample/output rate matrix ----------------- */
+
+test('saveflow: speed=1 keeps native sampling and output fps', () => {
+  const p = saveflow.clipParams({ start: 0, end: 5 }, 5, { fps: 12, format: 'gif' }, CROP, OUT, 1);
+  assert.equal(p.speed, 1);
+  assert.equal(p.hold, false);
+  assert.equal(p.fps, 12);
+  assert.equal(p.outputFps, 12);
+});
+
+test('saveflow: slow motion samples denser at the nominal output fps', () => {
+  // 0.5× @ 12 fps: capture 24 src frames/s, play back at 12 → duration ×2.
+  const p = saveflow.clipParams({ start: 0, end: 5 }, 5, { fps: 12, format: 'webm' }, CROP, OUT, 0.5);
+  assert.equal(p.hold, true);
+  assert.equal(p.fps, 24);
+  assert.equal(p.outputFps, 12);
+  // 0.25× @ 12 fps: 48 src frames/s.
+  const q = saveflow.clipParams({ start: 0, end: 5 }, 5, { fps: 12, format: 'gif' }, CROP, OUT, 0.25);
+  assert.equal(q.fps, 48);
+  assert.equal(q.outputFps, 12);
+  // Fractional rates round but never fall below 1.
+  const r = saveflow.clipParams({ start: 0, end: 5 }, 5, { fps: 5, format: 'gif' }, CROP, OUT, 0.9);
+  assert.equal(r.fps, Math.max(1, Math.round(5 / 0.9)));
+});
+
+test('saveflow: speed-up scales output fps, GIF-capped at 50, WebM uncapped', () => {
+  // 2× @ 12 fps: native sampling, 24 fps out.
+  const g = saveflow.clipParams({ start: 0, end: 5 }, 5, { fps: 12, format: 'gif' }, CROP, OUT, 2);
+  assert.equal(g.hold, false);
+  assert.equal(g.fps, 12);
+  assert.equal(g.outputFps, 24);
+  // 4× @ 12 = 48 ≤ 50 → untouched; GIF cap at 50 for higher fps.
+  assert.equal(saveflow.clipParams({ start: 0, end: 5 }, 5, { fps: 12, format: 'gif' }, CROP, OUT, 4).outputFps, 48);
+  assert.equal(saveflow.clipParams({ start: 0, end: 5 }, 5, { fps: 24, format: 'gif' }, CROP, OUT, 4).outputFps, 50);
+  // WebM has no GIF-delay floor.
+  assert.equal(saveflow.clipParams({ start: 0, end: 5 }, 5, { fps: 24, format: 'webm' }, CROP, OUT, 4).outputFps, 96);
+});
+
+test('saveflow: normalizeSpeed sanitizes into [0.25, 4]', () => {
+  assert.equal(saveflow.normalizeSpeed(1), 1);
+  assert.equal(saveflow.normalizeSpeed(0.5), 0.5);
+  assert.equal(saveflow.normalizeSpeed(4), 4);
+  assert.equal(saveflow.normalizeSpeed(8), 4);
+  assert.equal(saveflow.normalizeSpeed(0.1), 0.25);
+  assert.equal(saveflow.normalizeSpeed(0), 1);
+  assert.equal(saveflow.normalizeSpeed(-2), 1);
+  assert.equal(saveflow.normalizeSpeed('fast'), 1);
+  assert.equal(saveflow.normalizeSpeed(NaN), 1);
+  assert.equal(saveflow.normalizeSpeed(undefined), 1);
 });
 
 test('saveflow: mapSaveResult passes through a successful response', () => {

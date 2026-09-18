@@ -13,7 +13,8 @@ test('options: defaults when nothing stored', () => {
     loopOnPlay: true,
     clipPadStart: 3,
     clipPadEnd: 3,
-    format: 'gif',
+    format: 'webm',
+    dither: true,
   });
   assert.deepEqual(options.resolve(null), options.DEFAULTS);
 });
@@ -26,7 +27,8 @@ test('options: passes through valid values', () => {
     loopOnPlay: false,
     clipPadStart: 1,
     clipPadEnd: 5,
-    format: 'gif',
+    format: 'webm',
+    dither: true,
   });
 });
 
@@ -81,7 +83,21 @@ test('options: loopOnPlay defaults on and only explicit falsy turns it off', () 
   assert.equal(options.resolve({ loopOnPlay: null }).loopOnPlay, false);
 });
 
-test('options: unknown format falls back to gif', () => {
-  assert.equal(options.resolve({ format: 'webm' }).format, 'gif');
+test('options: format accepts gif and webm; unknown falls back to the webm default', () => {
+  assert.equal(options.resolve({ format: 'webm' }).format, 'webm');
   assert.equal(options.resolve({ format: 'gif' }).format, 'gif');
+  assert.equal(options.resolve({ format: 'mp4' }).format, 'webm');
+  assert.equal(options.resolve({ format: 'avi' }).format, 'webm');
+  assert.equal(options.resolve({}).format, 'webm');
+});
+
+test('options: dither defaults on and only explicit falsy turns it off', () => {
+  assert.equal(options.resolve({}).dither, true);
+  assert.equal(options.resolve({ dither: true }).dither, true);
+  assert.equal(options.resolve({ dither: 'true' }).dither, true);
+  assert.equal(options.resolve({ dither: 1 }).dither, true);
+  assert.equal(options.resolve({ dither: false }).dither, false);
+  assert.equal(options.resolve({ dither: 'false' }).dither, false);
+  assert.equal(options.resolve({ dither: 0 }).dither, false);
+  assert.equal(options.resolve({ dither: null }).dither, false);
 });

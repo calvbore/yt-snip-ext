@@ -230,6 +230,7 @@
             start: params.start,
             end: params.end,
             fps: params.fps,
+            hold: !!params.hold, // M17 slow motion: repeats are expected
           })) {
             if (signal && signal.aborted) break;
             if (first) {

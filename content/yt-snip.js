@@ -57,6 +57,7 @@
   var captureEngine = g.ytSnipCapture;
   var fallbackEngine = g.ytSnipFallback;
   var gifEngine = g.ytSnipGif;
+  var webmEngine = g.ytSnipWebm;
 
   var appState = 'idle';
   var machine = null;
@@ -64,6 +65,11 @@
   var clip = null; // { start, end, preview } times in seconds
   var zoomWindow = null; // { start, end } seconds — detail strip's magnified range
   var looping = false;
+  // M17 playback speed (preset multiplier, 0.25–4). Session-only: resets to
+  // 1× on every engage. Applied to the live player as a loop preview and fed
+  // into the save flow's capture/encode timing.
+  var clipSpeed = 1;
+  var SPEED_PRESETS = [0.25, 0.5, 1, 1.5, 2, 3, 4];
 
   // In-flight interaction state. `pendingSeek` stages scrub targets so a
   // handle drag coalesces into ~one seek per SEEK_MIN_INTERVAL instead of one
@@ -92,6 +98,8 @@
   var toolbarEl = null;
   var captureEl = null;
   var loopBtn = null;
+  var speedBtn = null;
+  var speedMenu = null;
   var saveBtn = null;
   var exitBtn = null;
   var cancelBtn = null;
@@ -136,6 +144,7 @@
       capture: captureEngine,
       fallback: fallbackEngine,
       gif: gifEngine,
+      webm: webmEngine,
     };
     var v = holder[name];
     if (!v) throw new Error('yt-snip: module "' + name + '" not loaded');
@@ -406,6 +415,15 @@
     '  padding: 8px 14px; border-radius: 4px; font: 13px/1.4 system-ui, sans-serif;',
     '  pointer-events: none; opacity: 0; transition: opacity 0.15s; }',
     '.snip-toast.show { opacity: 1; }',
+    // M17 speed menu: drops below the toolbar row (the toolbar is the anchor).
+    '.snip-speed-menu { position: absolute; top: calc(100% + 6px); left: auto;',
+    '  right: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px;',
+    '  background: rgba(0,0,0,0.92); border-radius: 6px; pointer-events: auto;',
+    '  min-width: 74px; }',
+    '.snip-speed-menu button { border: 0; border-radius: 4px; padding: 5px 10px;',
+    '  cursor: pointer; background: #333; color: #fff; font: 12px/1.2 system-ui, sans-serif;',
+    '  text-align: center; }',
+    '.snip-speed-menu button:hover { background: #3ea6ff; }',
   ].join('\n');
 
   /**
@@ -595,6 +613,19 @@
     loopBtn = document.createElement('button');
     loopBtn.textContent = 'Loop';
     wireButton(loopBtn, onLoopClick);
+    speedBtn = document.createElement('button');
+    speedBtn.textContent = 'Speed ' + speedLabel(clipSpeed);
+    wireButton(speedBtn, onSpeedClick);
+    speedMenu = document.createElement('div');
+    speedMenu.className = 'snip-speed-menu';
+    speedMenu.style.display = 'none';
+    SPEED_PRESETS.forEach(function (s) {
+      var chip = document.createElement('button');
+      chip.textContent = speedLabel(s);
+      chip.dataset.speed = String(s);
+      wireButton(chip, function () { setClipSpeed(s); });
+      speedMenu.appendChild(chip);
+    });
     saveBtn = document.createElement('button');
     saveBtn.textContent = 'Save';
     wireButton(saveBtn, onSaveClick);
@@ -604,6 +635,8 @@
     wireButton(exitBtn, function () { exitFlip('exit'); });
     toolbarEl.appendChild(clipLabel);
     toolbarEl.appendChild(loopBtn);
+    toolbarEl.appendChild(speedBtn);
+    toolbarEl.appendChild(speedMenu);
     toolbarEl.appendChild(saveBtn);
     toolbarEl.appendChild(exitBtn);
     shadow.appendChild(toolbarEl);
@@ -1460,6 +1493,46 @@
     }
   }
 
+  /* ---------------------------------------------------------------- *
+   * M17 playback speed: set + live preview + save timing
+   * ---------------------------------------------------------------- */
+
+  /** '1×', '0.25×', '1.5×' — compact label for a preset multiplier. */
+  function speedLabel(s) {
+    return (s % 1 === 0 ? String(Math.round(s)) : String(s)) + '×';
+  }
+
+  function onSpeedClick() {
+    if (!speedMenu) return;
+    speedMenu.style.display = speedMenu.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function hideSpeedMenu() {
+    if (speedMenu) speedMenu.style.display = 'none';
+  }
+
+  /**
+   * Apply a preset: updates the button label, mutates the live player's rate
+   * (loop preview plays at the chosen speed) and closes the menu. Rate
+   * restoration on exit is the state machine's job (activation snapshot).
+   */
+  function setClipSpeed(v) {
+    clipSpeed = saveflow.normalizeSpeed(v);
+    if (speedBtn) speedBtn.textContent = 'Speed ' + speedLabel(clipSpeed);
+    var video = getVideo();
+    if (video && appState === 'engaged') {
+      try { video.playbackRate = clipSpeed; } catch (e) { /* rate unsupported */ }
+    }
+    hideSpeedMenu();
+  }
+
+  /** Reset the speed state to 1× (engage + every exit path). */
+  function resetSpeed() {
+    clipSpeed = 1;
+    if (speedBtn) speedBtn.textContent = 'Speed ' + speedLabel(clipSpeed);
+    hideSpeedMenu();
+  }
+
   function tickLoop() {
     if (!looping || appState !== 'engaged' || !clip) return;
     var video = getVideo();
@@ -1570,51 +1643,87 @@
       var vh = dims.vh;
       var cropPx = requireDep('crop').toPixelRect(selection, vw, vh);
       var out = requireDep('crop').outputSize(selection, vw, vh, opts.maxDimension);
-      var encoder = new (requireDep('gif').GifEncoder)(out.w, out.h);
 
-      var params = requireDep('saveflow').clipParams(clip, video.duration, opts, cropPx, out);
-      var hooks = {
-        onProgress: function (f) { updateCaptureProgress(Math.round((f || 0) * 100)); },
-        render: function (index, mediaTime, canvas, ctx) {
-          var img = ctx.getImageData(0, 0, out.w, out.h);
-          encoder.addFrame({ data: img.data, width: out.w, height: out.h }, { delayMs: 1000 / params.fps });
-        },
-      };
+      // M16 encode path: WebM (truecolor VP9) when the user picked it and the
+      // browser can encode; otherwise GIF — which is also the automatic
+      // fallback when WebCodecs is missing.
+      var pick = opts.format === 'webm'
+        ? requireDep('webm').isSupported()
+        : Promise.resolve({ supported: false, reason: 'gif selected' });
 
-      if (video.muted === false) { /* keep audio for preview only; not captured */ }
+      return pick.then(function (sup) {
+        var useWebm = !!sup.supported;
+        if (opts.format === 'webm' && !useWebm) {
+          toast('WebM unavailable (' + (sup.reason || 'no encoder') + ') — saving GIF');
+        }
 
-      var attempt = requireDep('capture').captureFromVideo(video, params, hooks, captureSignal)
-        .catch(function (err) {
-          if (err && err.code === 'taint') {
-            updateCaptureLabel('Retrying (CORS mode)…');
-            return requireDep('fallback').captureFromLiveVideo(video, params, hooks, captureSignal);
+        var params = requireDep('saveflow').clipParams(clip, video.duration, opts, cropPx, out, clipSpeed);
+        var gifEncoder = useWebm ? null
+          : new (requireDep('gif').GifEncoder)(out.w, out.h, { dither: opts.dither !== false });
+        var webmFrames = useWebm ? [] : null;
+
+        var hooks = {
+          onProgress: function (f) { updateCaptureProgress(Math.round((f || 0) * 100)); },
+          render: function (index, mediaTime, canvas, ctx) {
+            var img = ctx.getImageData(0, 0, out.w, out.h);
+            if (useWebm) {
+              webmFrames.push(img);
+            } else {
+              gifEncoder.addFrame(
+                { data: img.data, width: out.w, height: out.h },
+                { delayMs: 1000 / params.outputFps }
+              );
+            }
+          },
+        };
+
+        if (video.muted === false) { /* keep audio for preview only; not captured */ }
+
+        var attempt = requireDep('capture').captureFromVideo(video, params, hooks, captureSignal)
+          .catch(function (err) {
+            if (err && err.code === 'taint') {
+              updateCaptureLabel('Retrying (CORS mode)…');
+              return requireDep('fallback').captureFromLiveVideo(video, params, hooks, captureSignal);
+            }
+            throw err;
+          })
+          .then(function () {
+            if (captureSignal.aborted) throw { code: 'aborted' };
+            var count = useWebm ? webmFrames.length : gifEncoder.frames.length;
+            if (count === 0) throw { code: 'no-frames' };
+            return { useWebm: useWebm, gifEncoder: gifEncoder, webmFrames: webmFrames, opts: opts };
+          });
+
+        return attempt.then(function (res) {
+          if (res.useWebm) {
+            return requireDep('webm').encodeFrames({
+              width: out.w,
+              height: out.h,
+              outputFps: params.outputFps,
+              frames: res.webmFrames,
+            }).then(function (bytes) {
+              return { bytes: bytes, useWebm: true, opts: res.opts };
+            });
           }
-          throw err;
-        })
-        .then(function () {
-          if (captureSignal.aborted) throw { code: 'aborted' };
-          if (encoder.frames.length === 0) throw { code: 'no-frames' };
-          return { encoder: encoder, opts: opts };
+          return { bytes: res.gifEncoder.end(), useWebm: false, opts: res.opts };
+        }).then(function (res) {
+          var ext = res.useWebm ? 'webm' : 'gif';
+          var title = (document.title || '').replace(/ - YouTube$/, '').trim();
+          var filename = requireDep('filename').makeFilename(title || 'clip', null, ext);
+          // Send the bytes as a plain array, not an ArrayBuffer: Chromium's
+          // runtime message serialization mangles ArrayBuffers into plain
+          // objects (the structured clone is not preserved across the
+          // content-script→service-worker boundary), while an array of byte
+          // values survives both engines' serialization. The background
+          // rebuilds a Uint8Array from it.
+          return requireDep('messaging').request(
+            'yt-snip:save',
+            { data: Array.from(res.bytes), filename: filename, saveAs: !!res.opts.saveAs }
+          ).then(
+            function (r) { return requireDep('saveflow').mapSaveResult(r, filename); },
+            function (err) { return requireDep('saveflow').mapSaveError(err, filename); }
+          );
         });
-
-      return attempt.then(function (res) {
-        var bytes = res.encoder.end();
-        // Send the bytes as a plain array, not an ArrayBuffer: Chromium's
-        // runtime message serialization mangles ArrayBuffers into plain
-        // objects (the structured clone is not preserved across the
-        // content-script→service-worker boundary), while an array of byte
-        // values survives both engines' serialization. The background
-        // rebuilds a Uint8Array from it.
-        var byteArray = Array.from(bytes);
-        var title = (document.title || '').replace(/ - YouTube$/, '').trim();
-        var filename = requireDep('filename').makeFilename(title || 'clip', null, 'gif');
-        return requireDep('messaging').request(
-          'yt-snip:save',
-          { data: byteArray, filename: filename, saveAs: !!res.opts.saveAs }
-        ).then(
-          function (r) { return requireDep('saveflow').mapSaveResult(r, filename); },
-          function (err) { return requireDep('saveflow').mapSaveError(err, filename); }
-        );
       });
     }).then(function (r) {
       hideCaptureUI();
@@ -1767,6 +1876,7 @@
       // whole duration — the fine-trim surface should start useful.
       refitZoomToClip();
       setLooping(false);
+      resetSpeed();
       updateClipLabel();
       positionRect();
       // The display block above ran before `clip` existed, so strip handles
@@ -1778,6 +1888,7 @@
       clip = null;
       zoomWindow = null;
       setLooping(false);
+      resetSpeed();
       dropStagedSeek();
       dragBox = null;
       scrubDrag = null;
@@ -1808,6 +1919,8 @@
       get currentTime() { return video.currentTime; },
       set currentTime(t) { video.currentTime = t; },
       get paused() { return video.paused; },
+      get playbackRate() { return video.playbackRate; },
+      set playbackRate(r) { video.playbackRate = r; },
       pause: function () { pausePlayback(); },
       play: function () { resumePlayback(); },
     }, { onChange: onStateChange });
@@ -1921,11 +2034,16 @@
     // Poll as a fallback (navigate-finish is not documented/stable).
     urlTimer = setInterval(onNavigate, 500);
 
-    // Escape exits the tool from any state.
+    // Escape: a speed menu that's open closes FIRST (menu-local escape); only
+    // otherwise does Esc disengage the whole tool.
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && appState !== 'idle') {
         e.preventDefault();
         e.stopPropagation();
+        if (speedMenu && speedMenu.style.display !== 'none') {
+          hideSpeedMenu();
+          return;
+        }
         exitFlip('esc');
       }
     }, true);
