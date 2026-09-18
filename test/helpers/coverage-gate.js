@@ -23,9 +23,20 @@ const res = spawnSync(process.execPath, args, { encoding: 'utf8' });
 
 const output = res.stdout + (res.stderr || '');
 
-if (res.status !== 0 && !output.includes('# start of coverage report')) {
-  // Tests failed before coverage could even report.
+// A non-zero exit means tests failed — the coverage report may still be
+// present (node prints it even on failures), but the gate must not mask a
+// red suite behind green coverage.
+const failCount = (function () {
+  const m = /# fail (\d+)/.exec(output);
+  return m ? parseInt(m[1], 10) : 0;
+})();
+
+if ((res.status !== 0 && !output.includes('# start of coverage report')) || failCount > 0) {
+  // Tests failed (before or after coverage reported).
   process.stdout.write(output);
+  console.error(
+    '\ncoverage gate: ' + failCount + ' unit test(s) failed — fix tests before the gate can pass'
+  );
   process.exit(res.status || 1);
 }
 
