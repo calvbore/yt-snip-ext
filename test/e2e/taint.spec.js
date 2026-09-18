@@ -26,7 +26,7 @@ const CROSS_ORIGIN_MEDIA =
   'http://127.0.0.1:8124/test/.fixtures/current/media.webm';
 
 test('cross-origin media uses the fallback path and captures correctly', async ({ page }) => {
-  await h.openWatch(page, { media: CROSS_ORIGIN_MEDIA, options: { fps: 1, maxDimension: 256 } });
+  await h.openWatch(page, { media: CROSS_ORIGIN_MEDIA, options: { fps: 1, maxDimension: 256, format: 'gif' } });
 
   // Instrument both engines so the test can prove which path ran.
   await page.evaluate(() => {

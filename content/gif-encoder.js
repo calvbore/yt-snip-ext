@@ -4,7 +4,14 @@
  * Self-contained GIF89a encoder for yt-snip output.
  *
  *  - Median-cut quantizer maps an RGBA frame to a per-frame local palette
- *    (≤ 256 colors), so each captured frame is quantized independently.
+ *    (≤ 256 colors). Quality upgrades (M16): the box to split is chosen by
+ *    *variance × pixel count* (not count alone — a dominant background used
+ *    to starve small objects of palette entries), and the palette is refined
+ *    with 2 weighted k-means (Lloyd) passes over the distinct colors.
+ *  - Optional Floyd–Steinberg error-diffusion dithering (serpentine, clamped,
+ *    5-bit bucket cache) turns residual quantization error into noise instead
+ *    of hard-edged banding — the main defense for smooth video gradients.
+ *    Nearest-color lookups are perceptually weighted (2/4/3).
  *  - LZW code-stream writer follows the classic "compress" / GIF approach
  *    (the same algorithm as omggif's GifWriter, MIT; adapted here so the
  *    encoder and the test-tier decoder stay independent implementations).
@@ -64,6 +71,18 @@
     return { r: maxR - minR, g: maxG - minG, b: maxB - minB };
   }
 
+  function boxTotal(list) {
+    var total = 0;
+    for (var i = 0; i < list.length; i++) total += list[i].count;
+    return total;
+  }
+
+  /**
+   * Median cut with a variance-aware box picker: the box to split maximizes
+   * (color volume × pixel count) rather than pixel count alone, so a huge
+   * uniform background cannot monopolize the palette while small-but-distinct
+   * objects collapse into averaged blends (M16 finding 2).
+   */
   function medianCut(colors, target) {
     if (colors.length <= target) {
       return colors.map(function (c) {
@@ -73,39 +92,42 @@
     var boxes = [colors];
 
     while (boxes.length < target) {
-      // pick the box with the most pixels (or largest range as a tiebreak)
-      var bi = 0;
-      var bestCount = -1;
+      var bi = -1;
+      var bestScore = -1;
       for (var i = 0; i < boxes.length; i++) {
-        var total = 0;
-        for (var j = 0; j < boxes[i].length; j++) total += boxes[i][j].count;
-        if (total > bestCount) {
-          bestCount = total;
+        var box = boxes[i];
+        if (box.length === 1) continue; // cannot split a single-color box
+        var rng = range(box);
+        var spread = rng.r + rng.g + rng.b;
+        if (spread === 0) continue; // solid box — splitting adds nothing
+        var score = boxTotal(box) * (spread + 1);
+        if (score > bestScore) {
+          bestScore = score;
           bi = i;
         }
       }
-      var box = boxes[bi];
-      if (box.length === 1) break; // cannot split a solid box
-      var rng = range(box);
-      var channel = rng.r >= rng.g && rng.r >= rng.b ? 'r' : rng.g >= rng.b ? 'g' : 'b';
+      if (bi < 0) break; // every remaining box is solid or single-color
+
+      var chosen = boxes[bi];
+      var crng = range(chosen);
+      var channel = crng.r >= crng.g && crng.r >= crng.b ? 'r' : crng.g >= crng.b ? 'g' : 'b';
 
       // sort by the chosen channel, split at the weighted median
-      box.sort(function (a, b) { return a[channel] - b[channel]; });
-      var sum = 0;
-      for (var k = 0; k < box.length; k++) sum += box[k].count;
+      chosen.sort(function (a, b) { return a[channel] - b[channel]; });
+      var sum = boxTotal(chosen);
       var half = sum / 2;
       var acc = 0;
-      var splitAt = box.length - 1;
-      for (var m = 0; m < box.length; m++) {
-        acc += box[m].count;
+      var splitAt = chosen.length - 1;
+      for (var m = 0; m < chosen.length; m++) {
+        acc += chosen[m].count;
         if (acc >= half) {
           splitAt = m + 1;
           break;
         }
       }
-      if (splitAt <= 0 || splitAt >= box.length) splitAt = Math.floor(box.length / 2);
-      boxes[bi] = box.slice(0, splitAt);
-      boxes.push(box.slice(splitAt));
+      if (splitAt <= 0 || splitAt >= chosen.length) splitAt = Math.floor(chosen.length / 2);
+      boxes[bi] = chosen.slice(0, splitAt);
+      boxes.push(chosen.slice(splitAt));
     }
 
     return boxes.map(function (box) {
@@ -120,12 +142,17 @@
     });
   }
 
+  /** Perceptual squared distance (green dominates human perception). */
+  function perceptualDist(r, g, b, pr, pg, pb) {
+    var dr = pr - r, dg = pg - g, db = pb - b;
+    return 2 * dr * dr + 4 * dg * dg + 3 * db * db;
+  }
+
   function nearest(palette, r, g, b) {
     var best = 0;
     var bestDist = Infinity;
     for (var i = 0; i < palette.length; i++) {
-      var dr = palette[i].r - r, dg = palette[i].g - g, db = palette[i].b - b;
-      var dist = dr * dr + dg * dg + db * db;
+      var dist = perceptualDist(r, g, b, palette[i].r, palette[i].g, palette[i].b);
       if (dist < bestDist) {
         bestDist = dist;
         best = i;
@@ -135,32 +162,164 @@
   }
 
   /**
+   * Weighted k-means (Lloyd) refinement of a median-cut palette, run over the
+   * distinct colors (capped by frequency — the tail is perceptually rare).
+   * Two iterations: reassign colors to the nearest centroid, recompute each
+   * centroid as its members' count-weighted mean. Empty centroids keep their
+   * previous position so the palette size stays stable.
+   */
+  function kmeansRefine(colors, palette, iterations) {
+    if (palette.length === 0) return palette;
+    var K = palette.length;
+    var cent = new Float64Array(K * 3);
+    for (var c0 = 0; c0 < K; c0++) {
+      cent[c0 * 3] = palette[c0].r;
+      cent[c0 * 3 + 1] = palette[c0].g;
+      cent[c0 * 3 + 2] = palette[c0].b;
+    }
+    var MAX_KMEANS_COLORS = 20000;
+    var pool = colors;
+    if (colors.length > MAX_KMEANS_COLORS) {
+      pool = colors.slice().sort(function (a, b) { return b.count - a.count; })
+        .slice(0, MAX_KMEANS_COLORS);
+    }
+    for (var it = 0; it < iterations; it++) {
+      var sums = new Float64Array(K * 4); // r,g,b,count per centroid
+      for (var i = 0; i < pool.length; i++) {
+        var c = pool[i];
+        var best = 0;
+        var bestDist = Infinity;
+        for (var k = 0; k < K; k++) {
+          var dist = perceptualDist(c.r, c.g, c.b, cent[k * 3], cent[k * 3 + 1], cent[k * 3 + 2]);
+          if (dist < bestDist) { bestDist = dist; best = k; }
+        }
+        sums[best * 4] += c.r * c.count;
+        sums[best * 4 + 1] += c.g * c.count;
+        sums[best * 4 + 2] += c.b * c.count;
+        sums[best * 4 + 3] += c.count;
+      }
+      for (var k2 = 0; k2 < K; k2++) {
+        if (sums[k2 * 4 + 3] > 0) {
+          cent[k2 * 3] = sums[k2 * 4] / sums[k2 * 4 + 3];
+          cent[k2 * 3 + 1] = sums[k2 * 4 + 1] / sums[k2 * 4 + 3];
+          cent[k2 * 3 + 2] = sums[k2 * 4 + 2] / sums[k2 * 4 + 3];
+        }
+      }
+    }
+    var out = new Array(K);
+    for (var k3 = 0; k3 < K; k3++) {
+      out[k3] = {
+        r: Math.min(255, Math.max(0, Math.round(cent[k3 * 3]))),
+        g: Math.min(255, Math.max(0, Math.round(cent[k3 * 3 + 1]))),
+        b: Math.min(255, Math.max(0, Math.round(cent[k3 * 3 + 2]))),
+      };
+    }
+    return out;
+  }
+
+  /**
+   * Floyd–Steinberg error diffusion (serpentine scan, clamped diffusion
+   * buffer). Nearest lookups are cached on a 5-bit-per-channel bucket key —
+   * diffused colors only ever move a few steps from their source, so the
+   * bucket approximation is safe and keeps the cost near O(1) per pixel.
+   */
+  function ditherIndices(rgba, palette, width, height) {
+    var K = palette.length;
+    var cache = new Int16Array(32768).fill(-1);
+    var buf = new Float32Array(width * height * 3);
+    var i, p;
+    for (p = 0, i = 0; p < width * height; p++, i += 4) {
+      buf[p * 3] = rgba[i];
+      buf[p * 3 + 1] = rgba[i + 1];
+      buf[p * 3 + 2] = rgba[i + 2];
+    }
+    var indices = new Uint8Array(width * height);
+    var clamp = function (v) { return v < 0 ? 0 : v > 255 ? 255 : v; };
+
+    function nearestCached(r, g, b) {
+      var key = (((r & 0xf8) << 7) | ((g & 0xf8) << 2) | (b >> 3)) & 0x7fff;
+      var hit = cache[key];
+      if (hit >= 0) return hit;
+      var best = nearest(palette, r, g, b);
+      cache[key] = best;
+      return best;
+    }
+
+    for (var y = 0; y < height; y++) {
+      var reverse = (y & 1) === 1; // serpentine: alternate scan direction
+      for (var step = 0; step < width; step++) {
+        var x = reverse ? width - 1 - step : step;
+        p = y * width + x;
+        var o = p * 3;
+        var r = clamp(buf[o]);
+        var g = clamp(buf[o + 1]);
+        var b = clamp(buf[o + 2]);
+        var idx = nearestCached(r, g, b);
+        indices[p] = idx;
+        var er = r - palette[idx].r;
+        var eg = g - palette[idx].g;
+        var eb = b - palette[idx].b;
+        // (dx, weight) pairs; mirrored when scanning right-to-left
+        var spread = [
+          [1, 7 / 16],
+          [-1, 3 / 16],
+          [0, 5 / 16],
+          [1, 1 / 16],
+        ];
+        for (var s = 0; s < 4; s++) {
+          var dx = reverse ? -spread[s][0] : spread[s][0];
+          var w = spread[s][1];
+          var nx = x + dx;
+          var ny = y + (s === 0 ? 0 : 1);
+          if (nx < 0 || nx >= width || ny >= height) continue;
+          var no = (ny * width + nx) * 3;
+          buf[no] += er * w;
+          buf[no + 1] += eg * w;
+          buf[no + 2] += eb * w;
+        }
+      }
+    }
+    return indices;
+  }
+
+  /**
    * Quantize an RGBA frame. Returns { palette: [r,g,b, ...], indices: Uint8Array }.
    * Only opaque pixels are considered; alpha is dropped (video frames are opaque).
+   * `opts.dither` (default true) enables Floyd–Steinberg error diffusion.
    */
-  function quantizeFrame(rgba, maxColors) {
+  function quantizeFrame(rgba, maxColors, opts) {
+    opts = opts || {};
+    var dither = opts.dither !== false;
     var max = maxColors || MAX_COLORS;
     var colors = gatherColors(rgba);
     var boxes = medianCut(colors, max);
-    var palette = [];
-    for (var i = 0; i < boxes.length; i++) {
-      palette.push(boxes[i].r, boxes[i].g, boxes[i].b);
-    }
-    var indices = new Uint8Array(rgba.length / 4);
-    // cache nearest lookups per distinct color key
-    var lookup = new Map();
-    var key = 0;
-    for (var px = 0; px < indices.length; px++) {
-      var i4 = px * 4;
-      key = ((rgba[i4] << 16) | (rgba[i4 + 1] << 8) | rgba[i4 + 2]) >>> 0;
-      var idx = lookup.get(key);
-      if (idx === undefined) {
-        idx = nearest(boxes, rgba[i4], rgba[i4 + 1], rgba[i4 + 2]);
-        lookup.set(key, idx);
+    var palette = kmeansRefine(colors, boxes, 2);
+    var w = opts.width, h = opts.height;
+    var width = w && h ? w : 0;
+    var height = w && h ? h : 0;
+    var indices;
+    if (dither && width > 0) {
+      indices = ditherIndices(rgba, palette, width, height);
+    } else {
+      indices = new Uint8Array(rgba.length / 4);
+      var lookup = new Map();
+      var key = 0;
+      for (var px = 0; px < indices.length; px++) {
+        var i4 = px * 4;
+        key = ((rgba[i4] << 16) | (rgba[i4 + 1] << 8) | rgba[i4 + 2]) >>> 0;
+        var idx = lookup.get(key);
+        if (idx === undefined) {
+          idx = nearest(palette, rgba[i4], rgba[i4 + 1], rgba[i4 + 2]);
+          lookup.set(key, idx);
+        }
+        indices[px] = idx;
       }
-      indices[px] = idx;
     }
-    return { palette: palette, indices: indices };
+    var flat = [];
+    for (var i = 0; i < palette.length; i++) {
+      flat.push(palette[i].r, palette[i].g, palette[i].b);
+    }
+    return { palette: flat, indices: indices };
   }
 
   /* ------------------------------------------------------------------ *
@@ -234,10 +393,15 @@
 
   function pad2(n) { return n & 0xff; }
 
-  function GifEncoder(width, height) {
+  /**
+   * `opts.dither` (default true) enables Floyd–Steinberg error diffusion on
+   * each frame; `opts.maxColors` (default 256) caps the palette.
+   */
+  function GifEncoder(width, height, opts) {
     if (!(width > 0 && height > 0)) throw new Error('GifEncoder: bad dimensions');
     this.width = width;
     this.height = height;
+    this.opts = opts || {};
     this.frames = [];
   }
 
@@ -258,7 +422,11 @@
     }
     var delayMs = opts.delayMs === undefined ? 100 : opts.delayMs;
     var delayCs = Math.max(1, Math.round(delayMs / 10));
-    var q = quantizeFrame(data, MAX_COLORS);
+    var q = quantizeFrame(data, this.opts.maxColors || MAX_COLORS, {
+      dither: this.opts.dither !== false,
+      width: w,
+      height: h,
+    });
     this.frames.push({ q: q, delayCs: delayCs });
     return this;
   };
@@ -323,5 +491,11 @@
   /** Convenience: quantize is exposed for tests. */
   GifEncoder.quantizeFrame = quantizeFrame;
 
-  return { GifEncoder: GifEncoder, quantizeFrame: quantizeFrame, medianCut: medianCut };
+  return {
+    GifEncoder: GifEncoder,
+    quantizeFrame: quantizeFrame,
+    medianCut: medianCut,
+    kmeansRefine: kmeansRefine,
+    ditherIndices: ditherIndices,
+  };
 });

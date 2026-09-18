@@ -40,8 +40,16 @@ function toBase64(u8) {
   return btoa(bin);
 }
 
-function toDataUrl(u8) {
-  return 'data:image/gif;base64,' + toBase64(u8);
+/** MIME by filename extension (M16: GIF + WebM output). */
+var MIME_BY_EXT = { gif: 'image/gif', webm: 'video/webm' };
+
+function mimeFor(filename) {
+  var ext = String(filename || '').split('.').pop().toLowerCase();
+  return MIME_BY_EXT[ext] || 'application/octet-stream';
+}
+
+function toDataUrl(u8, mime) {
+  return 'data:' + (mime || 'image/gif') + ';base64,' + toBase64(u8);
 }
 
 var offscreenReady = false;
@@ -90,11 +98,11 @@ function sendBlobUrlMessage(message) {
  * which cannot create blob URLs itself (that's what the offscreen document
  * is for). Falls back to a data URL.
  */
-function makeDownloadUrl(u8) {
+function makeDownloadUrl(u8, mime) {
   if (typeof URL.createObjectURL === 'function') {
     try {
       return Promise.resolve({
-        url: URL.createObjectURL(new Blob([u8], { type: 'image/gif' })),
+        url: URL.createObjectURL(new Blob([u8], { type: mime || 'image/gif' })),
         isBlobUrl: true,
       });
     } catch (e) {
@@ -103,16 +111,16 @@ function makeDownloadUrl(u8) {
   }
   return ensureOffscreen().then(function (ok) {
     if (!ok) {
-      return { url: toDataUrl(u8), isBlobUrl: false };
+      return { url: toDataUrl(u8, mime), isBlobUrl: false };
     }
-    return sendBlobUrlMessage({ type: 'yt-snip:make-blob-url', b64: toBase64(u8) })
+    return sendBlobUrlMessage({ type: 'yt-snip:make-blob-url', b64: toBase64(u8), mime: mime })
       .then(function (resp) {
         if (resp && resp.ok && resp.url) {
           return { url: resp.url, isBlobUrl: true };
         }
-        return { url: toDataUrl(u8), isBlobUrl: false };
+        return { url: toDataUrl(u8, mime), isBlobUrl: false };
       }, function () {
-        return { url: toDataUrl(u8), isBlobUrl: false };
+        return { url: toDataUrl(u8, mime), isBlobUrl: false };
       });
   });
 }
@@ -179,7 +187,9 @@ function downloadClip(payload) {
     return Promise.resolve({ ok: false, error: 'background: downloads API unavailable' });
   }
 
-  return makeDownloadUrl(u8).then(function (route) {
+  var mime = mimeFor(payload.filename);
+
+  return makeDownloadUrl(u8, mime).then(function (route) {
     return promiseFromDownloads(api, 'download', [{
       url: route.url,
       filename: payload.filename,

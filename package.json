@@ -1,6 +1,6 @@
 {
   "name": "yt-snip",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Windows-style snipping tool for YouTube videos — capture a crop of a video over a time range as an Anki-viewable GIF.",
   "private": true,
   "license": "MIT",

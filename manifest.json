@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "yt-snip",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Windows-style snipping tool for YouTube videos: drag a crop, scrub start/end points, and save an Anki-viewable animated clip.",
   "permissions": ["downloads", "storage", "offscreen"],
   "host_permissions": [
@@ -37,6 +37,8 @@
         "lib/filename.js",
         "lib/saveflow.js",
         "content/gif-encoder.js",
+        "lib/vendor/mediabunny.js",
+        "content/webm-encoder.js",
         "content/capture.js",
         "content/fallback-capture.js",
         "content/yt-snip.js"

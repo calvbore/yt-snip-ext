@@ -79,7 +79,7 @@ function expectedMarkerSourceX(media) {
 
 test.describe('full-frame capture', () => {
   test('saves a valid, correctly-timed GIF with restored state', async ({ page }) => {
-    await h.openWatch(page, { options: { fps: 1, maxDimension: 256 } });
+    await h.openWatch(page, { options: { fps: 1, maxDimension: 256, format: 'gif' } });
     // Seek mid-video so the M13 default clip (±3 s around activation,
     // clamped) still covers the full fixture — the frame-count and barcode
     // math below assume the whole 5 s range.
@@ -135,7 +135,7 @@ test.describe('full-frame capture', () => {
 test.describe('crop region capture', () => {
   test('GIF content matches only the snipped rectangle', async ({ page }) => {
     // Snip the top-left quadrant: x 0..320, y 0..90 (source px).
-    await h.openWatch(page, { options: { fps: 1, maxDimension: 512 } });
+    await h.openWatch(page, { options: { fps: 1, maxDimension: 512, format: 'gif' } });
     // Mid-video seek keeps the M13 default clip at the full fixture range
     // (the marker-sweep assertions below assume it).
     await page.evaluate(() => {
@@ -210,7 +210,7 @@ test.describe('fail-fast hardening', () => {
   }
 
   test('A1 refuses to save while an ad is showing (upfront guard)', async ({ page }) => {
-    await h.openWatch(page, { options: { fps: 1 } });
+    await h.openWatch(page, { options: { fps: 1, format: 'gif' } });
     await h.startSnip(page);
     await h.dragSelect(page, { x: 40, y: 40 }, { x: 400, y: 200 });
 
@@ -234,7 +234,7 @@ test.describe('fail-fast hardening', () => {
   });
 
   test('A1 aborts a running capture when an ad starts (frame loop)', async ({ page }) => {
-    await h.openWatch(page, { options: { fps: 12 } });
+    await h.openWatch(page, { options: { fps: 12, format: 'gif' } });
     await h.startSnip(page);
     await h.dragSelect(page, { x: 40, y: 40 }, { x: 400, y: 200 });
 
@@ -261,7 +261,7 @@ test.describe('fail-fast hardening', () => {
   });
 
   test('A2 fails fast with a toast when the video is emptied mid-capture', async ({ page }) => {
-    await h.openWatch(page, { options: { fps: 12 } });
+    await h.openWatch(page, { options: { fps: 12, format: 'gif' } });
     await h.startSnip(page);
     await h.dragSelect(page, { x: 40, y: 40 }, { x: 400, y: 200 });
 
@@ -311,7 +311,7 @@ test.describe('save-flow failure handling', () => {
   // toast was dead code. These tests pin the normalized outcome to its path:
   // failure toast (not "Capture failed:"), clean disengage, video restored.
   test('M9 surfaces a background save error and restores the video', async ({ page }) => {
-    await h.openWatch(page, { options: { fps: 1, maxDimension: 256 } });
+    await h.openWatch(page, { options: { fps: 1, maxDimension: 256, format: 'gif' } });
     await page.evaluate(async () => {
       document.querySelector('video.html5-main-video').currentTime = 1.5;
     });
@@ -332,7 +332,7 @@ test.describe('save-flow failure handling', () => {
   });
 
   test('M9 restores cleanly when the save request itself rejects', async ({ page }) => {
-    await h.openWatch(page, { options: { fps: 1, maxDimension: 256 } });
+    await h.openWatch(page, { options: { fps: 1, maxDimension: 256, format: 'gif' } });
     await page.evaluate(async () => {
       document.querySelector('video.html5-main-video').currentTime = 1.5;
     });

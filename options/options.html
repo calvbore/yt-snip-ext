@@ -23,6 +23,28 @@
         <span class="hint">Long edge of the output. The short edge scales with the crop so Anki stays happy.</span>
       </label>
 
+      <label class="field">
+        <span class="field-label">Format</span>
+        <span class="field-row" role="radiogroup" aria-label="Output format">
+          <label class="check radio">
+            <input type="radio" name="format" id="formatWebm" value="webm">
+            <span class="field-label">WebM (recommended)</span>
+            <span class="hint">Truecolor VP9 video. Full color — no 256-color GIF palette. Plays in AnkiDroid; AnkiMobile needs iOS 17.4+.</span>
+          </label>
+          <label class="check radio">
+            <input type="radio" name="format" id="formatGif" value="gif">
+            <span class="field-label">GIF</span>
+            <span class="hint">Universally compatible (and auto-looping), but capped at 256 colors per frame. Larger files at high quality.</span>
+          </label>
+        </span>
+      </label>
+
+      <label class="field check">
+        <input type="checkbox" id="dither">
+        <span class="field-label">Dither GIF colors</span>
+        <span class="hint">Error-diffusion dithering for GIF output — removes banding on smooth gradients. No effect on WebM.</span>
+      </label>
+
       <label class="field check">
         <input type="checkbox" id="saveAs">
         <span class="field-label">Ask where to save each clip</span>

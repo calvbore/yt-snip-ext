@@ -41,6 +41,8 @@ const CONTENT_FILES = [
   'lib/filename.js',
   'lib/saveflow.js',
   'content/gif-encoder.js',
+  'lib/vendor/mediabunny.js',
+  'content/webm-encoder.js',
   'content/capture.js',
   'content/fallback-capture.js',
   'content/yt-snip.js',

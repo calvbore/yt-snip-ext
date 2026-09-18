@@ -28,6 +28,8 @@
     document.getElementById('loopOnPlay').checked = opts.loopOnPlay;
     document.getElementById('clipPadStart').value = opts.clipPadStart;
     document.getElementById('clipPadEnd').value = opts.clipPadEnd;
+    document.getElementById('dither').checked = opts.dither;
+    (opts.format === 'gif' ? document.getElementById('formatGif') : document.getElementById('formatWebm')).checked = true;
   }).catch(function (e) {
     flash('Could not load settings: ' + e.message, false);
   });
@@ -40,6 +42,8 @@
     var loopOnPlay = document.getElementById('loopOnPlay').checked;
     var clipPadStart = parseInt(document.getElementById('clipPadStart').value, 10);
     var clipPadEnd = parseInt(document.getElementById('clipPadEnd').value, 10);
+    var dither = document.getElementById('dither').checked;
+    var format = document.getElementById('formatGif').checked ? 'gif' : 'webm';
     var normalized = ytSnipOptions.resolve({
       fps: fps,
       maxDimension: maxDimension,
@@ -47,6 +51,8 @@
       loopOnPlay: loopOnPlay,
       clipPadStart: clipPadStart,
       clipPadEnd: clipPadEnd,
+      dither: dither,
+      format: format,
     });
 
     ytSnipStorage.set({
@@ -57,6 +63,7 @@
       clipPadStart: normalized.clipPadStart,
       clipPadEnd: normalized.clipPadEnd,
       format: normalized.format,
+      dither: normalized.dither,
     }).then(function () {
       flash('Settings saved', true);
       // reflect clamped values back into the form

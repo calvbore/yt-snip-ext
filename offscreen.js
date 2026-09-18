@@ -19,7 +19,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
           atob(message.b64),
           function (c) { return c.charCodeAt(0); }
         );
-        var url = URL.createObjectURL(new Blob([bytes], { type: 'image/gif' }));
+        var url = URL.createObjectURL(new Blob([bytes], { type: message.mime || 'image/gif' }));
         sendResponse({ ok: true, url: url });
       } catch (e) {
         sendResponse({ ok: false, error: e.message });

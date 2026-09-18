@@ -57,6 +57,17 @@ input[type="number"] {
 }
 .field.check .field-label { margin: 0; font-weight: 500; }
 
+.field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #888;
+  border-radius: 4px;
+}
+.field-row .check.radio { align-items: flex-start; }
+.field-row .hint { margin-top: 2px; font-weight: 400; }
+
 .actions {
   margin-top: 24px;
   display: flex;
